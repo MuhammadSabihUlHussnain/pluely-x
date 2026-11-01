@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -8,6 +9,15 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+  },
+  build: {
+    // Streamdown ships shiki grammars and mermaid as lazy chunks; the main
+    // bundle is large but local (Tauri serves it from disk).
+    chunkSizeWarningLimit: 1600,
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
