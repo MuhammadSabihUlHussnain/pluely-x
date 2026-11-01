@@ -1,4 +1,4 @@
-import { AlertTriangle, Library, PanelTop, Settings } from "lucide-react";
+import { AlertTriangle, Library, PanelTop, Power, Settings } from "lucide-react";
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -107,6 +107,13 @@ function Sidebar() {
         className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
       >
         <PanelTop className="size-4" /> Show overlay
+      </button>
+      <button
+        type="button"
+        onClick={() => void native.appQuit().catch(() => {})}
+        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+      >
+        <Power className="size-4" /> Quit Pluely X
       </button>
     </nav>
   );

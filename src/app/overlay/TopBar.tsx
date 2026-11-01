@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   ShieldCheck,
   ShieldOff,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Hint, IconButton, Kbd } from "@/components/common";
@@ -83,6 +84,13 @@ export function TopBar() {
       <IconButton label="Collapse to a pill" onClick={() => void collapse()}>
         <Minimize2 />
       </IconButton>
+      <IconButton
+        label="Hide the overlay (listening keeps running; bring it back from the tray icon)"
+        keys={keys.toggle_overlay.key}
+        onClick={() => void native.windowHide().catch(() => {})}
+      >
+        <X />
+      </IconButton>
     </header>
   );
 }
@@ -92,17 +100,21 @@ function ModeMenu({ mode }: { mode: Mode }) {
   const override = useLive((s) => s.briefOverride);
   const defaultBrief = briefs.find((b) => b.mode === mode) ?? null;
   const activeBriefId = override === undefined ? defaultBrief?.id ?? null : override;
+  // While listening the Listen button grows (timer + meters); show the mode as an icon only
+  // so the bar still fits 440 px.
+  const compact = useLive((s) => s.status !== "idle");
 
   return (
     <DropdownMenu onOpenChange={(open) => open && void loadBriefs()}>
-      <Hint label="Mode — changes how answers are written">
+      <Hint label={`Mode: ${MODE_META[mode].label} — changes how answers are written`}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            aria-label={`Mode: ${MODE_META[mode].label}`}
             className="flex h-8 items-center gap-1.5 rounded-lg pl-2 pr-1.5 text-[13.5px] font-medium text-foreground transition-colors hover:bg-foreground/[0.08] data-[state=open]:bg-foreground/[0.1]"
           >
             <ModeIcon mode={mode} className="size-4 text-muted-foreground" />
-            {MODE_META[mode].label}
+            <span className={compact ? "sr-only" : undefined}>{MODE_META[mode].label}</span>
             <ChevronDown className="size-3.5 text-subtle" />
           </button>
         </DropdownMenuTrigger>
