@@ -1,6 +1,5 @@
 import { ArrowDown, KeyRound } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseAnswer, talkingPoints } from "@/core/ai/answer";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Kbd } from "@/components/common";
 import { MODE_META } from "@/core/defaults";
 import { useCards, type Card } from "@/core/live/cards";
@@ -16,9 +15,11 @@ import { useOverlay } from "./store";
 export function AnswerStack() {
   const cards = useCards((s) => s.cards);
   const last = cards[cards.length - 1];
-  const progress = useSpeechProgress(last);
-  const version = `${cards.length}:${last?.id}:${last?.content.length}:${last?.status}:${progress.line}`;
-  const { ref, following, follow } = useFollowNewest(last?.id, version, progress);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const contentVersion = `${cards.length}:${last?.id}:${last?.content.length}:${last?.status}`;
+  const progress = useVoiceFollow(ref, last, contentVersion);
+  const version = `${contentVersion}:${progress.line}:${progress.spoken}`;
+  const { following, follow } = useFollowNewest(ref, last?.id, version, progress);
   useAutoFit(ref, last, version);
 
   return (
@@ -30,7 +31,7 @@ export function AnswerStack() {
           <div className="flex flex-col gap-2">
             {cards.map((c) => (
               <div key={c.id} data-card-id={c.id}>
-                <AnswerCard card={c} progress={c.id === last?.id ? progress : undefined} />
+                <AnswerCard card={c} />
               </div>
             ))}
           </div>
@@ -58,33 +59,57 @@ const EDGE_PAD = 10;
  * A new answer jumps into view; scrolling by hand pauses following until the next answer
  * (or "Latest answer").
  */
+/** The answer's reading blocks in order: leaf paragraphs, list items and headings. */
+function readingBlocks(card: HTMLElement): HTMLElement[] {
+  const all = Array.from(card.querySelectorAll<HTMLElement>("[data-answer] :is(p, li, h1, h2, h3, h4, h5, h6)"));
+  return all.filter((e) => !e.closest("pre") && !all.some((o) => o !== e && e.contains(o)) && e.innerText.trim());
+}
+
 /**
- * While listening, follows the user's own voice through the newest answer (what the mic
- * hears since the answer appeared, matched against its lines).
+ * While listening, follows the user's voice through the newest answer, whatever its layout
+ * (bullets, paragraphs, headed sections from a custom prompt): the answer's visible blocks
+ * are matched against what the mic heard since the answer appeared. Blocks already said are
+ * marked data-say="said", the one being read data-say="current" (styled in global.css).
  */
-function useSpeechProgress(card: Card | undefined): SpeechProgress {
+function useVoiceFollow(
+  ref: React.RefObject<HTMLDivElement | null>,
+  last: Card | undefined,
+  contentVersion: string,
+): SpeechProgress {
   const status = useLive((s) => s.status);
   const startedAtMs = useLive((s) => s.startedAtMs);
   const transcript = useLive((s) => s.transcript);
-  const id = card?.id;
-  const content = card?.content ?? "";
-  const kind = card?.kind;
-  const createdAt = card?.createdAt ?? 0;
-  const lines = useMemo(() => {
-    if (!content || kind === "summary") return null;
-    const p = parseAnswer(content);
-    return p.headline ? [p.headline, ...(talkingPoints(p.body) ?? [])] : null;
-  }, [content, kind]);
-  return useMemo(() => {
-    if (!id || !lines || status !== "live" || !startedAtMs) return NO_PROGRESS;
-    // Speech since just before the answer appeared, on the session clock.
-    const from = createdAt - startedAtMs - 1500;
-    const spoken = segments(transcript)
-      .filter((s) => s.source === "me" && s.t1Ms >= from)
-      .map((s) => s.text)
-      .join(" ");
-    return spoken ? speechProgress(lines, spoken) : NO_PROGRESS;
-  }, [id, lines, status, startedAtMs, createdAt, transcript]);
+  const [progress, setProgress] = useState<SpeechProgress>(NO_PROGRESS);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const card = last ? el.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(last.id)}"]`) : null;
+    const blocks = card ? readingBlocks(card) : [];
+    // Marks only ever live on the newest answer.
+    el.querySelectorAll<HTMLElement>("[data-say]").forEach((n) => {
+      if (!blocks.includes(n)) n.removeAttribute("data-say");
+    });
+    let prog = NO_PROGRESS;
+    const readable = last && last.kind !== "summary" && last.kind !== "heard" && last.content;
+    if (card && readable && status === "live" && startedAtMs && blocks.length) {
+      // Speech since just before the answer appeared, on the session clock.
+      const from = last.createdAt - startedAtMs - 1500;
+      const spoken = segments(transcript)
+        .filter((s) => s.source === "me" && s.t1Ms >= from)
+        .map((s) => s.text)
+        .join(" ");
+      if (spoken) prog = speechProgress(blocks.map((b) => b.innerText), spoken);
+    }
+    blocks.forEach((b, i) => {
+      const v = !prog.active ? null : i < prog.line ? "said" : i === prog.line ? "current" : null;
+      if (v) b.dataset.say = v;
+      else b.removeAttribute("data-say");
+    });
+    setProgress((p) => (p.active === prog.active && p.line === prog.line && p.spoken === prog.spoken && p.total === prog.total ? p : prog));
+  }, [ref, last, contentVersion, status, startedAtMs, transcript]);
+
+  return progress;
 }
 
 /** Top of `el` in the scroll container's content coordinates. */
@@ -118,8 +143,12 @@ function useAutoFit(ref: React.RefObject<HTMLDivElement | null>, last: Card | un
   }, [ref, last, version, collapsed]);
 }
 
-function useFollowNewest(lastId: string | undefined, version: string, progress: SpeechProgress) {
-  const ref = useRef<HTMLDivElement | null>(null);
+function useFollowNewest(
+  ref: React.RefObject<HTMLDivElement | null>,
+  lastId: string | undefined,
+  version: string,
+  progress: SpeechProgress,
+) {
   const [following, setFollowing] = useState(true);
   const followRef = useRef(true);
   const lastIntent = useRef(0);
@@ -143,7 +172,7 @@ function useFollowNewest(lastId: string | undefined, version: string, progress: 
     let target = Math.max(0, Math.min(top, bottom - el.clientHeight));
     // Reading aloud: keep the line being said about a quarter of the way down.
     const prog = progressRef.current;
-    const current = prog.active ? card.querySelector<HTMLElement>("[data-say-current]") : null;
+    const current = prog.active ? card.querySelector<HTMLElement>('[data-say="current"]') : null;
     if (prog.active && prog.spoken >= prog.total) {
       // Finished reading: stay at the end of the answer (follow-up chips), don't jump back up.
       target = Math.max(0, Math.max(top, bottom - el.clientHeight));
@@ -161,6 +190,16 @@ function useFollowNewest(lastId: string | undefined, version: string, progress: 
     followRef.current = true;
     setFollowing(true);
   }, [lastId]);
+
+  // Reading on resumes following after a manual scroll: the voice says where you are.
+  const lastLine = useRef(-1);
+  useEffect(() => {
+    if (progress.active && progress.line > lastLine.current) {
+      followRef.current = true;
+      setFollowing(true);
+    }
+    lastLine.current = progress.active ? progress.line : -1;
+  }, [progress.active, progress.line]);
 
   useEffect(() => {
     align();

@@ -376,3 +376,16 @@ body.surface-overlay.mock-backdrop {
 .answer-prose li::marker {
   color: var(--subtle);
 }
+
+/* Follow my voice (overlay): answer blocks already said fade, the one being read is marked. */
+[data-answer] [data-say] {
+  transition: opacity 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
+}
+[data-answer] [data-say="said"] {
+  opacity: 0.45;
+}
+[data-answer] [data-say="current"] {
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--you) 16%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--you) 16%, transparent);
+}
