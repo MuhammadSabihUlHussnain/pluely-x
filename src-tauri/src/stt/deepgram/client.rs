@@ -46,11 +46,22 @@ pub struct DgTimings {
     pub rate_limit_min: Duration,
     /// Frames kept while disconnected.
     pub backlog: Duration,
+    /// After real speech, send Finalize once the audio has stayed below `quiet_db` this
+    /// long (or frames stopped for `QUIET_GAP`). Deepgram otherwise sometimes holds the
+    /// last final for ~5 s on a quiet loopback stream. `None` disables it.
+    pub quiet_finalize: Option<Duration>,
+    /// Frame RMS (dBFS) at or below which audio counts as quiet for `quiet_finalize`.
+    pub quiet_db: f32,
 }
+
+/// Fallback for `quiet_finalize`: frames stopped arriving altogether after speech.
+const QUIET_GAP: Duration = Duration::from_secs(1);
 
 impl Default for DgTimings {
     fn default() -> Self {
         Self {
+            quiet_finalize: Some(Duration::from_millis(600)),
+            quiet_db: -45.0,
             keepalive_after: Duration::from_secs(4),
             tick: Duration::from_secs(1),
             watchdog_audio: Duration::from_secs(10),
@@ -394,6 +405,10 @@ async fn run_connection(
     let mut audio_since_msg_ms: u64 = 0;
     let mut tick = tokio::time::interval_at(Instant::now() + t.tick, t.tick);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // Quiet finalize: after speech, flush Deepgram once the audio goes quiet.
+    let mut finalize_at: Option<Instant> = None;
+    let mut voiced = false;
+    let mut quiet_since: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -410,6 +425,17 @@ async fn run_connection(
                     }
                     last_audio = Instant::now();
                     audio_since_msg_ms += d;
+                    if let Some(after) = t.quiet_finalize {
+                        let (rms, _) = crate::audio::level::rms_peak_pcm(&f.pcm);
+                        if crate::audio::level::to_db(rms) > t.quiet_db {
+                            voiced = true;
+                            quiet_since = None;
+                            finalize_at = Some(last_audio + QUIET_GAP);
+                        } else if voiced {
+                            let since = *quiet_since.get_or_insert(last_audio);
+                            finalize_at = Some(since + after);
+                        }
+                    }
                 }
                 None => {
                     // Capture side is gone for good: flush like a Stop.
@@ -436,6 +462,14 @@ async fn run_connection(
                     return ConnEnd::Failed(Failure::retry("dg_network", "Connection closed."));
                 }
             },
+            _ = sleep_until(finalize_at.unwrap_or_else(Instant::now)), if finalize_at.is_some() && !ctx.muted => {
+                finalize_at = None;
+                voiced = false;
+                quiet_since = None;
+                if let Err(e) = sink.send(Message::text(protocol::FINALIZE)).await {
+                    return ConnEnd::Failed(Failure::retry("dg_network", format!("Finalize failed: {e}")));
+                }
+            },
             _ = tick.tick() => {
                 if audio_since_msg_ms >= t.watchdog_audio.as_millis() as u64 {
                     let _ = tokio::time::timeout(Duration::from_millis(500), sink.close()).await;
@@ -456,6 +490,12 @@ async fn run_connection(
                 Some(DgControl::Mute(m)) => {
                     let was = ctx.muted;
                     ctx.muted = m;
+                    if m {
+                        // Mute sends its own Finalize; don't fire a stale one on unmute.
+                        finalize_at = None;
+                        voiced = false;
+                        quiet_since = None;
+                    }
                     if m && !was {
                         if let Err(e) = sink.send(Message::text(protocol::FINALIZE)).await {
                             return ConnEnd::Failed(Failure::retry("dg_network", format!("Finalize failed: {e}")));

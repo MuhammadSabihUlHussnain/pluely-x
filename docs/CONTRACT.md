@@ -122,7 +122,7 @@ type SessionEvent =
  | { type: "transcriptPatch"; segId: string; echo: boolean }
  | { type: "speechStarted"; source: Source; tMs: number }
  | { type: "utteranceEnd"; source: Source; lastWordEndMs: number }
- | { type: "turn"; source: Source; turnId: string; text: string; t0Ms: number; t1Ms: number; reason: "speechFinal" | "utteranceEnd" | "stop"; question: boolean }
+ | { type: "turn"; source: Source; turnId: string; text: string; t0Ms: number; t1Ms: number; reason: "speechFinal" | "utteranceEnd" | "finalize" | "stop"; question: boolean }
  | { type: "levels"; tMs: number; me: Level | null; them: Level | null }          // 10 Hz
  | { type: "error"; source?: Source; code: string; message: string; fatal: boolean; retryInMs?: number }
  | { type: "stats"; source: Source; sentMs: number; droppedMs: number; reconnects: number; discontinuities: number }   // every 5 s
@@ -132,7 +132,7 @@ type SessionEvent =
 **Semantics:**
 - **Interim results:** interims for the same `segId` replace each other until `isFinal`.
 - **Time:** `t0Ms`/`t1Ms` are on one session clock (ms since session start), so they're comparable across me and them.
-- **Turns:** exactly one `turn` is sent per speaker turn. `question` is a cheap hint (ends with `?`).
+- **Turns:** exactly one `turn` is sent per speaker turn. `question` is a cheap hint (ends with `?`). *(added after e2e)* When a source's audio stops arriving (loopback goes idle once the other side stops talking), Rust sends Deepgram `Finalize` 300 ms after the last frame. The flushed final ends the turn with `reason: "finalize"`. Without it, Deepgram sometimes held the last final for ~5 s.
 - **Echo:** an `echo: true` transcript (or a later `transcriptPatch`) is mic audio duplicating `them`; the UI hides it by default.
 
 **Error codes:** `mic_permission_denied`, `device_not_found`, `device_lost`, `audio_init_failed`, `key_missing`, `dg_auth`, `dg_payment`, `dg_rate_limited`, `dg_bad_request`, `dg_network`, `dg_server`, `dg_timeout`.

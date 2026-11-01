@@ -773,7 +773,9 @@ impl Supervisor {
                 let was_shown = rt.shown_interims.remove(&seg.seg_id);
                 if empty && !was_shown {
                     // Silence final: nothing to show, but it can still end a turn.
-                    if let Some(t) = rt.turns.on_final("", seg.t0_ms, seg.t1_ms, seg.speech_final) {
+                    if let Some(t) =
+                        rt.turns.on_final("", seg.t0_ms, seg.t1_ms, seg.speech_final, seg.from_finalize)
+                    {
                         self.emit_turn(t);
                     }
                     return;
@@ -813,7 +815,9 @@ impl Supervisor {
         if seg.is_final {
             // Echo text never forms a "me" turn.
             let text = if echo == Some(true) { "" } else { seg.text.as_str() };
-            if let Some(t) = self.src[i].turns.on_final(text, seg.t0_ms, seg.t1_ms, seg.speech_final) {
+            if let Some(t) =
+                self.src[i].turns.on_final(text, seg.t0_ms, seg.t1_ms, seg.speech_final, seg.from_finalize)
+            {
                 self.emit_turn(t);
             }
         }

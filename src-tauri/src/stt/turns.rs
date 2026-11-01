@@ -1,9 +1,10 @@
 //! Speaker-turn detection (pure).
 //!
 //! Collects `is_final` segments per source and emits exactly one turn when Deepgram says
-//! the speaker finished: on `speech_final`, or on `UtteranceEnd` if finals are still
-//! pending (so speech_final followed by UtteranceEnd yields one turn, not two). `stop`
-//! flushes whatever is left when the source or session stops.
+//! the speaker finished: on `speech_final`, on a final flushed by `Finalize` (sent when
+//! the source's audio went idle), or on `UtteranceEnd` if finals are still pending (so
+//! speech_final followed by UtteranceEnd yields one turn, not two). `stop` flushes
+//! whatever is left when the source or session stops.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,8 @@ use crate::audio::Source;
 pub enum TurnReason {
     SpeechFinal,
     UtteranceEnd,
+    /// Deepgram flushed the pending audio after an idle `Finalize`.
+    Finalize,
     Stop,
 }
 
@@ -50,14 +53,23 @@ impl TurnTracker {
         }
     }
 
-    /// A final segment. Empty text still counts as a speech_final marker.
-    pub fn on_final(&mut self, text: &str, t0_ms: i64, t1_ms: i64, speech_final: bool) -> Option<Turn> {
+    /// A final segment. Empty text still counts as a speech_final / finalize marker.
+    pub fn on_final(
+        &mut self,
+        text: &str,
+        t0_ms: i64,
+        t1_ms: i64,
+        speech_final: bool,
+        from_finalize: bool,
+    ) -> Option<Turn> {
         let text = text.trim();
         if !text.is_empty() {
             self.pending.push((text.to_string(), t0_ms, t1_ms));
         }
         if speech_final {
             self.emit(TurnReason::SpeechFinal)
+        } else if from_finalize {
+            self.emit(TurnReason::Finalize)
         } else {
             None
         }
@@ -104,6 +116,7 @@ mod tests {
     #[derive(Debug, Clone, Copy)]
     enum Ev {
         Final(&'static str, i64, i64, bool),
+        Finalized(&'static str, i64, i64),
         UttEnd,
         Stop,
     }
@@ -113,13 +126,30 @@ mod tests {
         let mut out = Vec::new();
         for e in events {
             let r = match *e {
-                Ev::Final(s, a, b, sf) => t.on_final(s, a, b, sf),
+                Ev::Final(s, a, b, sf) => t.on_final(s, a, b, sf, false),
+                Ev::Finalized(s, a, b) => t.on_final(s, a, b, false, true),
                 Ev::UttEnd => t.on_utterance_end(),
                 Ev::Stop => t.flush(),
             };
             out.extend(r);
         }
         out
+    }
+
+    #[test]
+    fn idle_finalize_ends_the_turn_once() {
+        // The source went idle mid-question: Deepgram flushes on Finalize, and a late
+        // UtteranceEnd must not create a second turn.
+        let turns = run(&[
+            Ev::Final("Can you tell me about a project", 13400, 15200, false),
+            Ev::Finalized("you're really proud of?", 15200, 18360),
+            Ev::UttEnd,
+        ]);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].reason, TurnReason::Finalize);
+        assert_eq!(turns[0].text, "Can you tell me about a project you're really proud of?");
+        assert!(turns[0].question);
+        assert!(run(&[Ev::Finalized("", 0, 10)]).is_empty(), "empty flush with nothing pending");
     }
 
     #[test]

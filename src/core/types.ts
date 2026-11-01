@@ -125,7 +125,7 @@ export interface TurnEvent {
   text: string;
   t0Ms: number;
   t1Ms: number;
-  reason: "speechFinal" | "utteranceEnd" | "stop";
+  reason: "speechFinal" | "utteranceEnd" | "finalize" | "stop";
   question: boolean;
 }
 export type SessionEvent =

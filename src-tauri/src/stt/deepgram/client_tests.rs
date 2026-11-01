@@ -469,3 +469,50 @@ async fn mute_sends_finalize_and_drops_audio() {
     }
     h.control.send(DgControl::Stop).unwrap();
 }
+
+#[tokio::test]
+async fn quiet_finalize_after_speech() {
+    let mut dg = MockDeepgram::start(vec![]).await;
+    let timings = DgTimings {
+        quiet_finalize: Some(Duration::from_millis(200)),
+        ..DgTimings::default()
+    };
+    let mut h = start_client(&dg.base_url(), timings);
+    let mut server = dg.accept(Duration::from_secs(5)).await;
+    h.wait_for("live", Duration::from_secs(5), |e| matches!(e, DgEvent::Live { .. })).await;
+    let loud = |seq: u32| {
+        let mut f = frame(seq);
+        let mut samples: Vec<i16> = (0..FRAME_SAMPLES).map(|i| if i % 2 == 0 { 8000 } else { -8000 }).collect();
+        samples[0] = seq as i16;
+        f.pcm = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        f
+    };
+    // Quiet audio before any speech never finalizes.
+    for seq in 0..4 {
+        h.frames.send(frame(seq)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // Speech, then a quiet stream that keeps flowing (like loopback after a sentence).
+    for seq in 4..8 {
+        h.frames.send(loud(seq)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    for seq in 8..20 {
+        h.frames.send(frame(seq)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let mut texts = Vec::new();
+    let mut binaries = 0;
+    while let Some(m) = server.next_timeout(Duration::from_millis(400)).await {
+        match m {
+            Got::Text(t) => texts.push((binaries, t)),
+            Got::Binary(_) => binaries += 1,
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(binaries, 20);
+    assert_eq!(texts.len(), 1, "exactly one Finalize: {texts:?}");
+    assert_eq!(texts[0].1, r#"{"type":"Finalize"}"#);
+    assert!(texts[0].0 >= 10, "sent after the quiet period, not during speech: {texts:?}");
+    h.control.send(DgControl::Stop).unwrap();
+}
