@@ -10,7 +10,7 @@ import { segments } from "@/core/live/transcript";
 import { useKeys, useSettings, useShortcutHealth } from "@/core/settings";
 import { ModeIcon } from "../shared/modes";
 import { AnswerCard } from "./AnswerCard";
-import { fitOverlayHeight, openDashboard } from "./controller";
+import { fitOverlayHeight, openDashboard, setMode } from "./controller";
 import { useOverlay } from "./store";
 
 export function AnswerStack() {
@@ -241,16 +241,31 @@ function EmptyState() {
   }
 
   if (status !== "idle") {
+    const auto = MODE_META[mode].autoAnswers;
     const text =
       mode === "lecture"
-        ? "Listening. Key points collect under Notes — ask anything below."
-        : MODE_META[mode].autoAnswers
+        ? "Listening. Key points collect under Notes. Questions you hear show up here with an Answer button."
+        : auto
           ? "Listening. When someone asks you something, the answer appears here."
-          : "Listening.";
+          : `${MODE_META[mode].label} mode doesn't answer on its own. Questions you hear show up here with an Answer button.`;
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
         <p className="text-[14px] text-muted-foreground">{text}</p>
-        <p className="mt-2 flex items-center gap-1.5 text-[13px] text-subtle">
+        {!auto && mode !== "lecture" ? (
+          <div className="mt-3 flex gap-2">
+            {(["interview", "meeting"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => void setMode(m)}
+                className="rounded-lg border border-white/12 px-3 py-1.5 text-[13px] font-medium text-foreground hover:bg-foreground/[0.08]"
+              >
+                Switch to {MODE_META[m].label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-subtle">
           Stuck? <span className="text-muted-foreground">What should I say?</span> <Kbd keys={sc.ask_now.key} />
         </p>
       </div>

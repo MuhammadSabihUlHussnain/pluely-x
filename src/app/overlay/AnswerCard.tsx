@@ -9,7 +9,8 @@ import { cardSink, type Card } from "@/core/live/cards";
 import type { SpeechProgress } from "@/core/live/follow";
 import { pipeline, retrySummary } from "@/core/live/session";
 import { cn } from "@/lib/utils";
-import { openDashboard, replyTo } from "./controller";
+import { MODE_META } from "@/core/defaults";
+import { openDashboard, replyTo, setMode } from "./controller";
 
 const CHIP_LABEL: Record<FollowupChip, string> = {
   shorter: "Shorter",
@@ -32,6 +33,8 @@ function kindLabel(c: Card): { text: string; tone: "them" | "you" | "muted" } {
       return { text: c.chip ? CHIP_LABEL[c.chip] : "Follow-up", tone: "muted" };
     case "summary":
       return { text: "Session summary", tone: "muted" };
+    case "heard":
+      return { text: "Them · question heard", tone: "them" };
   }
 }
 
@@ -82,6 +85,8 @@ export const AnswerCard = memo(function AnswerCard({ card, progress }: { card: C
 
       {isError ? (
         <ErrorBody card={card} />
+      ) : card.kind === "heard" ? (
+        <HeardBody card={card} />
       ) : card.kind === "summary" ? (
         <SummaryBody card={card} />
       ) : (
@@ -90,6 +95,32 @@ export const AnswerCard = memo(function AnswerCard({ card, progress }: { card: C
     </article>
   );
 });
+
+/** A question heard in a mode that doesn't answer on its own. */
+function HeardBody({ card }: { card: Card }) {
+  const label = MODE_META[card.mode]?.label ?? "This";
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => pipeline.answerHeard(card.id)}
+        className="rounded-lg bg-primary px-3 py-1.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
+      >
+        Answer it
+      </button>
+      <span className="text-[12.5px] text-muted-foreground">
+        {label} mode doesn't answer on its own.{" "}
+        <button
+          type="button"
+          onClick={() => void setMode("interview")}
+          className="font-medium text-foreground underline underline-offset-2 hover:opacity-80"
+        >
+          Switch to Interview
+        </button>
+      </span>
+    </div>
+  );
+}
 
 function Thinking() {
   return (

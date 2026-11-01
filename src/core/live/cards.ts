@@ -6,7 +6,8 @@ import type { FollowupChip } from "../ai/prompts";
 import type { SessionSummaryJson } from "../ai/schemas";
 import type { Mode } from "../types";
 
-export type CardKind = "auto" | "ask_now" | "typed" | "screen" | "followup" | "summary";
+/** "heard": a question from the other side in a mode without auto-answers, shown with an Answer button. */
+export type CardKind = "auto" | "ask_now" | "typed" | "screen" | "followup" | "summary" | "heard";
 export type CardStatus = "pending" | "thinking" | "streaming" | "done" | "stopped" | "error";
 
 export interface CardScreenshot {

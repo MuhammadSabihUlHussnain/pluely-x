@@ -155,6 +155,24 @@ describe("question pipeline", () => {
     expect(cards.cards[0].status).toBe("done");
   });
 
+  it("offers heard questions with an Answer button in modes without auto-answers", async () => {
+    const { pipeline, transport, cards, completed } = setup(() => ({ events: answer("A merger combines two companies into one.") }), "ask");
+    expect(pipeline.onTurn(turn("t1", "Thanks for joining."))).toBe(false);
+    expect(pipeline.onTurn(turn("t2", "What's the difference between a merger and an acquisition?"))).toBe(false);
+    expect(transport.calls).toHaveLength(0); // nothing is spent until the user asks
+    expect(cards.cards).toHaveLength(1);
+    expect(cards.cards[0]).toMatchObject({ kind: "heard", question: "Thanks for joining. What's the difference between a merger and an acquisition?" });
+    // A newer heard question replaces the unanswered one.
+    pipeline.onTurn(turn("t3", "Can you walk me through a basic merger model?"));
+    expect(cards.cards.map((c) => c.question)).toEqual(["Can you walk me through a basic merger model?"]);
+    pipeline.answerHeard(cards.cards[0].id);
+    await pipeline.idle();
+    expect(transport.calls).toHaveLength(1);
+    expect(lastUserText(transport.calls[0].body)).toContain("Can you walk me through a basic merger model?");
+    expect(cards.cards[0]).toMatchObject({ kind: "auto", status: "done", content: "A merger combines two companies into one." });
+    expect(completed).toHaveLength(1);
+  });
+
   it("never cancels an answer that is already showing text", async () => {
     const long = "I'd start with my background in data engineering. ".repeat(6);
     const { pipeline, cards, transport } = setup((_b, n) => (n === 0 ? { events: answer(long) } : { events: answer("Second.") }));

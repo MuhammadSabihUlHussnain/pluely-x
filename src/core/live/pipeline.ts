@@ -90,7 +90,11 @@ export class AnswerPipeline {
     if (turn.text.trim()) this.fragments.push({ seq, text: turn.text.trim(), t1Ms: turn.t1Ms });
 
     const mode = this.deps.mode();
-    if (!MODE_META[mode].autoAnswers) return false;
+    if (!MODE_META[mode].autoAnswers) {
+      // No auto-answers here (Ask, Lecture): offer a one-click answer instead of staying silent.
+      if (isCandidateQuestion(turn.text, turn.question)) this.offerHeard(mode, seq, turn.turnId);
+      return false;
+    }
 
     // An auto-answer still deciding (nothing on screen yet) is superseded by a fuller
     // version of its question; one that is already showing text is left alone.
@@ -114,6 +118,31 @@ export class AnswerPipeline {
       buildAutoAnswer(await this.deps.promptContext(mode), this.deps.transcript(), question),
     );
     return true;
+  }
+
+  /** Shows a heard question (no auto-answer in this mode) with an Answer button. */
+  private offerHeard(mode: Mode, seq: number, turnId: string): void {
+    const question = this.fragments
+      .filter((f) => f.seq > this.consumedSeq)
+      .map((f) => f.text)
+      .join(" ");
+    if (!question) return;
+    // Keep only the latest unanswered one so the panel doesn't fill up.
+    for (const c of this.deps.cards.all()) if (c.kind === "heard") this.deps.cards.remove(c.id);
+    this.newCard("heard", mode, { question, turnId, status: "done" });
+    this.consumedSeq = seq;
+  }
+
+  /** The user clicked Answer on a heard question. */
+  answerHeard(cardId: string): void {
+    const card = this.deps.cards.get(cardId);
+    if (!card || card.kind !== "heard") return;
+    const mode = this.deps.mode();
+    const question = card.question;
+    this.deps.cards.update(cardId, { kind: "auto", mode, status: "pending", content: "" });
+    this.start(cardId, async () =>
+      buildTypedAsk(await this.deps.promptContext(mode), { question, transcript: this.deps.transcript() }),
+    );
   }
 
   /** "What should I say?" — answers from the last ~2 minutes, no filter. */
