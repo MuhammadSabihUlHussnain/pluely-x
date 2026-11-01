@@ -8,7 +8,7 @@ export const DEFAULT_SHORTCUTS: AppSettings["shortcuts"] = {
   ask_now: { key: "ctrl+alt+enter", enabled: true },
   screenshot_full: { key: "ctrl+alt+s", enabled: true },
   screenshot_region: { key: "ctrl+alt+r", enabled: true },
-  focus_input: { key: "ctrl+alt+space", enabled: true },
+  focus_input: { key: "ctrl+alt+q", enabled: true },
   toggle_click_through: { key: "ctrl+alt+c", enabled: true },
   toggle_dashboard: { key: "ctrl+alt+d", enabled: true },
   move_up: { key: "ctrl+alt+arrowup", enabled: true },

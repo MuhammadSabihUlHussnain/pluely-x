@@ -250,7 +250,7 @@ type ShortcutAction = "toggle_overlay" | "toggle_listen" | "ask_now" | "screensh
 | `ask_now` | `ctrl+alt+enter` |
 | `screenshot_full` | `ctrl+alt+s` |
 | `screenshot_region` | `ctrl+alt+r` |
-| `focus_input` | `ctrl+alt+space` |
+| `focus_input` | `ctrl+alt+q` |
 | `toggle_click_through` | `ctrl+alt+c` |
 | `toggle_dashboard` | `ctrl+alt+d` |
 | `move_*` | `ctrl+alt+arrowup` / `ctrl+alt+arrowdown` / `ctrl+alt+arrowleft` / `ctrl+alt+arrowright` (hold to move) |
@@ -264,7 +264,7 @@ type ShortcutAction = "toggle_overlay" | "toggle_listen" | "ask_now" | "screensh
 | `shortcuts_validate` | `{ key: string }` | `boolean` (false for unparseable keys and for keys without Ctrl, Alt or Win, unless the key is F1–F24) |
 | `shortcuts_status` | – | `{ registered: ShortcutAction[]; failures: { action: ShortcutAction; key: string; error: string }[] }` *(added: startup failures happen before the webview listens, so call this on mount)* |
 
-Shortcuts are changed via `settings_update({ patch: { shortcuts } })`. Registration failures (for example a key taken by another app) emit `shortcut://error` (main) → `{ failures: { action: ShortcutAction; key: string; error: string }[] }`. On the dev machine `ctrl+backslash` and `ctrl+alt+space` were already taken (most likely by the installed Pluely), so the UI must surface these failures and offer the recorder. Some Intel graphics drivers also use Ctrl+Alt+arrows.
+Shortcuts are changed via `settings_update({ patch: { shortcuts } })`. Registration failures (for example a key taken by another app) emit `shortcut://error` (main) → `{ failures: { action: ShortcutAction; key: string; error: string }[] }`. On the dev machine `ctrl+backslash` was taken by the installed Pluely and `ctrl+alt+space` by another app (so `focus_input` now defaults to `ctrl+alt+q`), so the UI must surface these failures and offer the recorder. Some Intel graphics drivers also use Ctrl+Alt+arrows.
 
 ## 8. Misc events and commands
 
@@ -308,6 +308,16 @@ CREATE INDEX idx_sessions_started ON sessions(started_at DESC);   -- (added)
 ```
 
 Search with e.g. `SELECT t.* FROM transcript_fts f JOIN transcript t ON t.rowid = f.rowid WHERE transcript_fts MATCH ?`. Foreign keys are on (sqlx default), so deleting a session cascades to its rows and their FTS entries. The FTS indexes use the tables' implicit rowids, which a `VACUUM` may renumber: after any VACUUM run `INSERT INTO transcript_fts(transcript_fts) VALUES('rebuild')` and the same for `cards_fts`. The exact SQL is `src-tauri/src/db/migrations/v1.sql`.
+
+*(added at integration)* **Stored values** (written by the frontend; keep both sides in agreement):
+
+| Field | Values |
+|---|---|
+| `cards.kind` | `auto` (auto-answer to a Them question), `ask_now` ("What should I say?"), `typed`, `screen` (screenshot ask/solve), `followup:<chip>` (`shorter` / `more` / `example` / `followup`) |
+| `cards.status` | `done` or `truncated` (`stop_reason: max_tokens`); error cards are never stored |
+| `notes.kind` | the mode (`meeting`, `lecture`, ...) for rolling notes |
+| `sessions.summary_json` | the end-of-session summary |
+| `briefs.mode` | marks a brief as the default for that mode, so a brief can be the default for one mode at a time |
 
 ---
 

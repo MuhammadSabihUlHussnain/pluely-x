@@ -60,7 +60,7 @@ impl ShortcutAction {
             ShortcutAction::AskNow => "ctrl+alt+enter",
             ShortcutAction::ScreenshotFull => "ctrl+alt+s",
             ShortcutAction::ScreenshotRegion => "ctrl+alt+r",
-            ShortcutAction::FocusInput => "ctrl+alt+space",
+            ShortcutAction::FocusInput => "ctrl+alt+q",
             ShortcutAction::ToggleClickThrough => "ctrl+alt+c",
             ShortcutAction::ToggleDashboard => "ctrl+alt+d",
             ShortcutAction::MoveUp => "ctrl+alt+arrowup",

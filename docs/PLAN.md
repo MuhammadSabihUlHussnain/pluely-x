@@ -83,7 +83,7 @@ Intended outcome: a self-built Windows app, **Pluely X**, installed alongside th
     | "What should I say?" | Ctrl+Alt+Enter |
     | Ask about screen | Ctrl+Alt+S |
     | Ask about region | Ctrl+Alt+R |
-    | Type a question (focus the ask box) | Ctrl+Alt+Space |
+    | Type a question (focus the ask box) | Ctrl+Alt+Q |
     | Click-through on / off | Ctrl+Alt+C |
     | Move overlay | Ctrl+Alt+Arrows |
 

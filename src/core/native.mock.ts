@@ -719,7 +719,7 @@ export function createMockNative(): NativeApi {
 
     shortcutsStatus: async () => {
       const all = Object.keys(settings.shortcuts) as ShortcutAction[];
-      const taken = conflicts ? ["ctrl+backslash", "ctrl+alt+space"] : [];
+      const taken = conflicts ? ["ctrl+backslash", "ctrl+alt+q"] : [];
       const failures = all
         .filter((a) => settings.shortcuts[a].enabled && taken.includes(normalizeAccelerator(settings.shortcuts[a].key)))
         .map((a) => ({ action: a, key: settings.shortcuts[a].key, error: "HotKey already registered" }));
