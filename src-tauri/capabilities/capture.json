@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture",
+  "description": "Region-capture overlays (one per monitor)",
+  "windows": ["capture-overlay-*"],
+  "platforms": ["windows"],
+  "permissions": ["core:default"]
+}
