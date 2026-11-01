@@ -1,21 +1,20 @@
 {
   "name": "pluely-x",
   "private": false,
-  "version": "0.1.9",
+  "version": "0.1.0",
   "description": "Pluely X: a meeting, interview, coding and lecture copilot overlay for Windows (rebuilt from Pluely).",
   "author": {
-    "name": "Srikanth Nani",
-    "email": "mail@srikanthnani.com",
-    "url": "https://www.srikanthnani.com"
+    "name": "Muhammad Sabih Ul Hussnain",
+    "url": "https://github.com/MuhammadSabihUlHussnain"
   },
   "license": "GPL-3.0",
-  "homepage": "https://github.com/iamsrikanthnani/pluely#readme",
+  "homepage": "https://github.com/MuhammadSabihUlHussnain/pluely-x#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/iamsrikanthnani/pluely.git"
+    "url": "git+https://github.com/MuhammadSabihUlHussnain/pluely-x.git"
   },
   "bugs": {
-    "url": "https://github.com/iamsrikanthnani/pluely/issues"
+    "url": "https://github.com/MuhammadSabihUlHussnain/pluely-x/issues"
   },
   "keywords": [
     "ai-assistant",
@@ -88,5 +87,12 @@
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vitest": "^5.0.5"
-  }
+  },
+  "contributors": [
+    {
+      "name": "Srikanth Nani",
+      "email": "mail@srikanthnani.com",
+      "url": "https://www.srikanthnani.com"
+    }
+  ]
 }

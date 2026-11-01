@@ -1,162 +1,104 @@
-# Pluely v1 🚀
+# Pluely X
 
-_One overlay, no tab, no trace._
+**A real-time AI copilot for meetings, interviews, coding and lectures on Windows.** It sits in a small overlay, listens to both sides of a call, notices when you're asked something, and shows a short answer you can say out loud. It can also solve whatever is on your screen.
 
-<a href="https://pluely.com/">
-  <img src="/images/pluely-v1-cover.png" alt="Pluely: the Listen overlay with a live transcript, an answer grounded in attached files and follow-up chips, the Ask overlay with a screenshot and a code answer, and the feature list" width="100%" />
-</a>
+Pluely X is a ground-up rebuild of [Pluely](https://github.com/iamsrikanthnani/pluely) by Srikanth Nani. It keeps Pluely's native core (Tauri, system-audio capture, screenshots, an overlay hidden from screen share) and replaces the rest. See [Credits and license](#credits-and-license).
 
-<p align="center"><i>The real overlay in Listen and Ask mode. Invisible on screen shares.</i></p>
+<p>
+  <img src="docs/screens/overlay-listening-streaming.png" width="300" alt="Overlay answering a question while listening">
+  <img src="docs/screens/sessions-detail-summary.png" width="460" alt="Sessions library with an interview summary">
+</p>
 
----
+## What it does
 
-[![Website](https://img.shields.io/badge/Website-pluely.com-blue)](https://pluely.com/)
-[![Docs](https://img.shields.io/badge/Docs-docs.pluely.com-blue)](https://docs.pluely.com)
-[![Tauri](https://img.shields.io/badge/Built%20with-Tauri-orange)](https://tauri.app/)
-[![React](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue)](https://reactjs.org/)
-[![Source](<https://img.shields.io/badge/Source-Closed%20(v1%2B)-lightgrey>)](#why-pluely-v1-is-closed-source)
+- **One-minute setup.** Paste a Claude key and, optionally, a Deepgram key. Both are tested live and stored in Windows Credential Manager.
+- **Live two-sided transcript.** Your mic ("You") and the call audio ("Them") are captured separately and transcribed as people speak, using Deepgram's Nova-3 streaming.
+- **Answers when you're asked.** When the other person finishes a question, an answer starts streaming in about a second. Small talk is ignored. *What should I say?* (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd>) works any time.
+- **Answers you can say out loud.** Each answer opens with one or two first-person sentences you can read word for word, followed by a few short talking points. Private tips ("swap in your own numbers") are kept apart from the script.
+- **Your screen in one key.** Ask about the whole screen or a region you drag out. Coding mode solves the problem shown, with approach, complexity, edge cases and runnable code.
+- **Modes:** Meeting, Interview, Coding, Lecture and Ask. Each tunes how answers are written and what notes are kept.
+- **Briefs.** Attach your résumé, the job description, slides or an agenda (several PDF, DOCX, TXT or MD files) to ground answers in your real experience. Briefs are sent as a cached prompt prefix, so long ones stay fast and cheap.
+- **Notes and summaries.** Rolling notes during meetings and lectures, then a summary when the session ends: decisions, action items and a follow-up email; interview feedback; or lecture study notes and practice questions.
+- **Sessions library.** Full-text search across every transcript and answer, and Markdown export.
+- **Stays out of the way.** The overlay is hidden from screen sharing and recording, never steals focus from your call app, can be made click-through, and stays out of Alt+Tab.
 
-### 💝 **Socials**
+## Requirements
 
-[![GitHub](https://img.shields.io/badge/GitHub-iamsrikanthnani-black?style=flat&logo=github)](https://github.com/iamsrikanthnani)
-[![X](https://img.shields.io/badge/@srikanthnani-1DA1F2?style=flat&logo=X)](https://x.com/srikanthnani)
-[![Website](https://img.shields.io/badge/Website-srikanthnani.com-blue?style=flat&logo=globe)](https://www.srikanthnani.com/)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-iamsrikanthnani-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/iamsrikanthnani/)
+- Windows 10 or 11 (x64)
+- An [Anthropic API key](https://console.anthropic.com/). Answers use Claude Opus 5.5 by default; you can change the model and effort in Settings.
+- A [Deepgram API key](https://console.deepgram.com/) to transcribe live calls. It's optional if you only type questions or ask about your screen.
 
-> **Your invisible AI, over everything you do.** Ask about anything on your screen. Listen to any conversation and have the right answer before you need it. One overlay, no tab, no trace. Invisible on screen shares, and no bot ever joins your calls.
+## Build and run
 
-📖 Every feature is documented at **[docs.pluely.com](https://docs.pluely.com)**, from the [5-minute quickstart](https://docs.pluely.com/docs/getting-started/quickstart) to [live transcription](https://docs.pluely.com/docs/features/listen-mode), [automatic responses](https://docs.pluely.com/docs/features/auto-responses), and [every keyboard shortcut](https://docs.pluely.com/docs/guides/overlay-shortcuts).
+You need Node.js 20+, Rust (stable, MSVC toolchain) and Visual Studio Build Tools with the "Desktop development with C++" workload.
 
-### 🔒 Why is Pluely closed source now?
+```powershell
+npm ci
+npx tauri dev                    # run in development
+npx tauri build --bundles nsis   # build the Windows installer
+```
 
-Years of open Pluely code kept getting repackaged and sold as clones, and no license or complaint ever stopped it.
-So v1 ships as signed binaries while the product itself stays free to use at its core.
-The short story is [further down this page](#why-pluely-v1-is-closed-source), and everything else lives at [pluely.com](https://pluely.com).
+The installer is written to `src-tauri/target/release/bundle/nsis/`.
 
----
+Tests:
 
-## 📥 **Download Pluely**
+```powershell
+npx vitest run                          # frontend
+cd src-tauri; cargo test --lib          # native (no hardware or keys needed)
+cargo test --lib hw_ -- --ignored       # optional: real audio devices
+```
 
-<div align="center">
+## Default shortcuts
 
-### 🚀 **Get the Latest Release**
+| Action | Keys |
+|---|---|
+| Show / hide the overlay | <kbd>Ctrl</kbd>+<kbd>\\</kbd> |
+| Start / stop listening | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd> |
+| What should I say? | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> |
+| Ask about the screen | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> |
+| Ask about a region | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> |
+| Type a question | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Q</kbd> |
+| Click-through on / off | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> |
+| Sessions and settings | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> |
 
-[![Download for macOS](https://img.shields.io/badge/Download%20for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://pluely.com/download/macos) &nbsp; [![Download for Linux](https://img.shields.io/badge/Download%20for-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://pluely.com/download/linux) &nbsp; [![Download for Windows](https://img.shields.io/badge/Download%20for-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://pluely.com/download/windows)
+Every shortcut can be changed in Settings, and conflicts with other apps are reported.
 
-[![GitHub Release](https://img.shields.io/github/v/release/iamsrikanthnani/pluely?style=for-the-badge&logo=github&label=Latest%20Version)](https://pluely.com/releases) &nbsp; [![GitHub Downloads](https://img.shields.io/github/downloads/iamsrikanthnani/pluely/total?style=for-the-badge&logo=github&label=Total%20Downloads)](https://pluely.com/downloads)
+## Privacy
 
-**Available formats:** `.dmg` (macOS) • `.msi` / `.exe` (Windows) • `.deb` / `.rpm` / `.AppImage` (Linux)
+- API keys live in Windows Credential Manager and never reach the web view. All network calls are made by the Rust side.
+- Sessions, transcripts, briefs and settings are stored locally on your PC (SQLite).
+- Call audio is sent to Deepgram for transcription. Transcripts, screenshots you choose to send, and briefs go to Anthropic to generate answers. Nothing else is sent anywhere, and there is no telemetry.
 
-**Free plan forever** · no account needed to start · updates ship automatically
+## Use it responsibly
 
-</div>
+Recording or transcribing other people can require their consent, depending on where you are. Tell people when you're using it. Don't use it where AI assistance isn't allowed, such as exams, proctored tests or interviews that forbid it.
 
----
+## How it's built
 
-## ✨ What is Pluely v1?
+- **Native (Rust, Tauri 2):**
+  - WASAPI mic and loopback capture.
+  - Deepgram streaming over WebSockets.
+  - A streaming proxy for the Anthropic Messages API.
+  - DPI-correct screenshots.
+  - A non-activating, capture-excluded overlay, plus tray and global shortcuts.
+- **Frontend:** React, TypeScript, Tailwind and Zustand.
 
-Pluely v1 is a ground-up rebuild: one translucent overlay with two modes, **Ask** and **Listen**, plus a full dashboard for your chats, meetings, files, prompts, and settings. It's built for the moments where switching to a browser tab would cost you the room: interviews, sales calls, standups, lectures, live debugging.
+Design notes:
 
-|         🪶 **Lightweight**          |             🕶️ **Invisible**             |                ⚡ **Instant**                |
-| :---------------------------------: | :--------------------------------------: | :------------------------------------------: |
-|      **9 to 16 MB** installer       | Hidden from screen shares and recordings |  Launches in under 100ms, answers in a tap   |
-| A fraction of Electron alternatives | No meeting bot, no participant, no trace | Global hotkeys summon it from inside any app |
-|   Minimal CPU and RAM, even live    |  Can hide from the Dock and taskbar too  |    Streaming answers, live transcription     |
+- [docs/CONTRACT.md](docs/CONTRACT.md): every native command, event and channel.
+- [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md): the audio pipeline and windowing on Windows.
+- [docs/FRONTEND.md](docs/FRONTEND.md): frontend structure, stores and the browser mock.
+- [docs/PLAN.md](docs/PLAN.md): the original plan.
 
-## 💬 Ask mode
+## Credits and license
 
-<img src="/images/pluely-v1-ask.gif" alt="Ask mode: attach a screenshot of an error, ask what's breaking, get a streamed answer with follow-up suggestions" width="100%" />
+Pluely X is a modified version of **[Pluely](https://github.com/iamsrikanthnani/pluely)** by Srikanth Nani, released under the GNU General Public License v3.0. The upstream history is kept in this repository.
 
-Type a question, dictate it with push-to-talk, or let Pluely see your screen: capture it, drag-select a region, attach files, or turn on **Use image** so every message carries a fresh screenshot. Documents go through built-in OCR and stay in context for follow-up questions. Answers stream in as Markdown, and everything is saved locally where you can search, export, or delete it.
+Modifications by Muhammad Sabih Ul Hussnain, 2026:
+- The frontend was rewritten.
+- The audio capture and speech-to-text pipeline was replaced with streaming transcription.
+- Answers became question-aware and speakable.
+- Modes, briefs, notes, summaries and the sessions library were added.
+- The upstream server, licensing and telemetry code was removed.
 
-## 🎧 Listen mode
-
-<img src="/images/pluely-v1-listen.gif" alt="Listen mode: live transcript of a sales call, an automatic suggested answer, and one-tap follow-up chips" width="100%" />
-
-Hit Start and Pluely transcribes your mic and system audio live, with speaker labels and language selection. Automatic responses fire when someone asks a question, after every pause, or only when you tap Suggest. Smart follow-up chips appear under each answer, generated from the actual conversation. Every session is saved as a meeting with its full transcript.
-
-## 🧰 What else is in the box
-
-- **200+ hosted models** on Pro plans: GPT, Gemini, Claude, Llama and more, searchable and switchable mid-conversation, no API keys to manage.
-- **Upgrade from inside the app**: pick a plan, pay on the secure checkout, and Pro activates on that computer by itself. Bought on the website? Paste the emailed key once on the Dashboard.
-- **Free forever with your own keys**: connect any LLM or speech-to-text provider through a curl template, or plug in the AI CLIs you already have (Claude Code, Gemini CLI, Codex, Qwen Code, Ollama). No limits from us; it's your account.
-- **Real stealth**: excluded from screen capture, absent from recordings and screenshots, never steals focus from the app you're in, and the [icon can disappear from the Dock or taskbar](https://docs.pluely.com/docs/settings/app-icon-stealth). Details in [Stealth & privacy](https://docs.pluely.com/docs/features/stealth-privacy).
-- **Keyboard-first**: global hotkeys for summon, capture, and listening; single keys scroll the answer and transcript once the overlay has focus. Full reference: [Overlay shortcuts](https://docs.pluely.com/docs/guides/overlay-shortcuts).
-- **Private by architecture**: chats, meetings, transcripts, and files live in a local SQLite database on your machine. Your own provider keys stay local. Your conversations never train anything.
-- **Custom prompts with knowledge files**, a document library, plan and usage meters, and identical builds for macOS, Windows, and Linux.
-
-The full tour with visuals is at **[pluely.com/features](https://pluely.com/features)**, and pricing is at **[pluely.com/pricing](https://pluely.com/pricing)**.
-
-## 📚 Documentation
-
-[docs.pluely.com](https://docs.pluely.com) covers every feature, setting, and edge case, with per-OS guides where platforms differ:
-
-|                                       Start here                                        |                                  Features                                   |                                            Help                                             |
-| :-------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------: |
-|          [Quickstart](https://docs.pluely.com/docs/getting-started/quickstart)          |      [Listen mode](https://docs.pluely.com/docs/features/listen-mode)       |                   [FAQ](https://docs.pluely.com/docs/troubleshooting/faq)                   |
-|   [macOS permissions](https://docs.pluely.com/docs/getting-started/permissions-macos)   |   [Auto responses](https://docs.pluely.com/docs/features/auto-responses)    | [Shortcuts not working](https://docs.pluely.com/docs/troubleshooting/shortcuts-not-working) |
-| [Windows permissions](https://docs.pluely.com/docs/getting-started/permissions-windows) | [Stealth & privacy](https://docs.pluely.com/docs/features/stealth-privacy)  |            [Connect a CLI](https://docs.pluely.com/docs/settings/connect-a-cli)             |
-|   [Linux permissions](https://docs.pluely.com/docs/getting-started/permissions-linux)   | [Keyboard shortcuts](https://docs.pluely.com/docs/guides/overlay-shortcuts) |                     [Supported models](https://docs.pluely.com/models)                      |
-
----
-
-## Why Pluely v1 is closed source
-
-Pluely started fully open, first under MIT and later under GPL-3. The code was lifted and sold as rebranded commercial products almost from day one, and moving to GPL-3 changed nothing: the clones ignored the license entirely. I filed complaints and takedown requests and nothing came down. Chasing license violators across countries costs more time and money than one developer has, and even code I shared privately in good faith ended up misused.
-
-So from v1, a complete rewrite, Pluely ships as signed binaries only. The old GPL-3 code stays available under its license in this repo's history. Please don't ask for source access; the answer will be a polite no until I decide otherwise.
-
-What doesn't change: the free plan stays free, releases ship right here, [issues](https://github.com/iamsrikanthnani/pluely/issues) stay open for bug reports, and your data stays on your device.
-
----
-
-## 📋 Prerequisites
-
-Pluely installs like any normal desktop app. On Linux you need the WebKitGTK runtime that Tauri apps use, see [Tauri's prerequisites page](https://v2.tauri.app/start/prerequisites/) for your distro. macOS and Windows need nothing extra: grant the [screen and microphone permissions](https://docs.pluely.com/docs/getting-started/permissions-macos) on first run and you're set.
-
----
-
-## 🐛 Feedback & bug reports
-
-Found a bug or have an idea? Open a [GitHub issue](https://github.com/iamsrikanthnani/pluely/issues) or use [pluely.com/feedback](https://pluely.com/feedback). Real reports get fixed fast. For account or license help: [support@pluely.com](mailto:support@pluely.com).
-
-> 💡 **Like this project?** Consider [buying me a coffee ☕](https://www.buymeacoffee.com/srikanthnani)
-
----
-
-## 📄 License
-
-Pluely v1 and later are proprietary, closed-source software distributed as binaries. See [Why Pluely v1 is closed source](#why-pluely-v1-is-closed-source). Versions that were published under the GPL-3 remain available under that license in this repository's history.
-
----
-
-## 🙏 Acknowledgments
-
-- **[Tauri](https://tauri.app/)** - Amazing desktop framework
-- **[tauri-nspanel](https://github.com/ahkohd/tauri-nspanel)** - macOS native panel integration for Tauri
-- **[shadcn/ui](https://ui.shadcn.com/)** - Beautiful UI components
-
----
-
-## 🔗 Links
-
-- **Website**: [pluely.com](https://pluely.com/)
-- **Documentation**: [docs.pluely.com](https://docs.pluely.com)
-- **Models**: [pluely.com/models](https://pluely.com/models)
-- **Pricing**: [pluely.com/pricing](https://pluely.com/pricing)
-- **Releases**: [pluely.com/releases](https://pluely.com/releases)
-- **Issues**: [GitHub Issues](https://github.com/iamsrikanthnani/pluely/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/iamsrikanthnani/pluely/discussions)
-
----
-
-### 🌐 **Let's Connect**
-
-[![X](https://img.shields.io/badge/@srikanthnani-black?style=for-the-badge&logo=X)](https://x.com/srikanthnani)&nbsp;
-[![Website](https://img.shields.io/badge/Website-srikanthnani.com-black?style=for-the-badge&logo=globe)](https://www.srikanthnani.com/)&nbsp;
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-iamsrikanthnani-black?style=for-the-badge&logo=linkedin)](https://www.linkedin.com/in/iamsrikanthnani/)
-[![GitHub](https://img.shields.io/badge/GitHub-iamsrikanthnani-black?style=for-the-badge&logo=github)](https://github.com/iamsrikanthnani)&nbsp;
-
----
-
-**Made with ❤️ by [Srikanth Nani](https://www.srikanthnani.com/)**
+Pluely X is licensed under the **GNU General Public License v3.0**; see [LICENSE](LICENSE). It is not affiliated with or endorsed by the Pluely project, Cluely, Anthropic or Deepgram.
