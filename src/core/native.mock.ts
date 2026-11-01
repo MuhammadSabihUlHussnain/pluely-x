@@ -42,6 +42,8 @@ export interface MockControls {
   /** Multiplies every simulated delay (lower = faster). */
   speed: number;
   emit<E extends EventName>(event: E, payload: EventMap[E]): void;
+  /** Feeds a SessionEvent into the running mock session (e.g. "me" transcripts in tests). */
+  inject(ev: SessionEvent): void;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -215,7 +217,14 @@ export function createMockNative(): NativeApi {
     if (BROADCAST.includes(event)) bc?.postMessage({ event, payload });
   };
 
-  const controls: MockControls = { failNext: null, speed: 1, emit };
+  const controls: MockControls = {
+    failNext: null,
+    speed: 1,
+    emit,
+    inject: (ev) => {
+      if (session && !session.stopped) session.onEvent(ev);
+    },
+  };
   if (hasWindow) (window as unknown as { __pluelyxMock: MockControls }).__pluelyxMock = controls;
   const wait = (ms: number) => sleep(ms * controls.speed);
 

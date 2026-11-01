@@ -6,6 +6,7 @@ import { parseAnswer, speakableText, talkingPoints, type ParsedAnswer } from "@/
 import type { FollowupChip } from "@/core/ai/prompts";
 import { summaryToMarkdown } from "@/core/db/markdown";
 import { cardSink, type Card } from "@/core/live/cards";
+import type { SpeechProgress } from "@/core/live/follow";
 import { pipeline, retrySummary } from "@/core/live/session";
 import { cn } from "@/lib/utils";
 import { openDashboard, replyTo } from "./controller";
@@ -34,7 +35,7 @@ function kindLabel(c: Card): { text: string; tone: "them" | "you" | "muted" } {
   }
 }
 
-export const AnswerCard = memo(function AnswerCard({ card }: { card: Card }) {
+export const AnswerCard = memo(function AnswerCard({ card, progress }: { card: Card; progress?: SpeechProgress }) {
   const label = kindLabel(card);
   const busy = card.status === "pending" || card.status === "thinking" || card.status === "streaming";
   const isError = card.status === "error";
@@ -79,7 +80,13 @@ export const AnswerCard = memo(function AnswerCard({ card }: { card: Card }) {
         )}
       </header>
 
-      {isError ? <ErrorBody card={card} /> : card.kind === "summary" ? <SummaryBody card={card} /> : <AnswerBody card={card} />}
+      {isError ? (
+        <ErrorBody card={card} />
+      ) : card.kind === "summary" ? (
+        <SummaryBody card={card} />
+      ) : (
+        <AnswerBody card={card} progress={progress} />
+      )}
     </article>
   );
 });
@@ -92,7 +99,7 @@ function Thinking() {
   );
 }
 
-function AnswerBody({ card }: { card: Card }) {
+function AnswerBody({ card, progress }: { card: Card; progress?: SpeechProgress }) {
   const parsed = useMemo(() => parseAnswer(card.content), [card.content]);
   const streaming = card.status === "streaming";
   const detailsDefaultOpen = card.mode === "coding";
@@ -103,7 +110,7 @@ function AnswerBody({ card }: { card: Card }) {
 
   return (
     <div>
-      <SpokenAnswer parsed={parsed} streaming={streaming} />
+      <SpokenAnswer parsed={parsed} streaming={streaming} progress={progress} />
       {parsed.details ? (
         <div className="mt-2">
           <button
@@ -189,19 +196,46 @@ function copyText(content: string): string {
  * as roomy, high-contrast lines (not muted prose), then the private note set apart so it is
  * never read out by accident.
  */
-export function SpokenAnswer({ parsed, streaming }: { parsed: ParsedAnswer; streaming: boolean }) {
+export function SpokenAnswer({
+  parsed,
+  streaming,
+  progress,
+}: {
+  parsed: ParsedAnswer;
+  streaming: boolean;
+  progress?: SpeechProgress;
+}) {
   const points = useMemo(() => talkingPoints(parsed.body), [parsed.body]);
+  // Teleprompter: while the user reads the answer aloud, lines already said fade and
+  // the line they're on is marked (line 0 is the opening line, then the points).
+  const follow = progress?.active ? progress.line : -1;
+  const lineState = (i: number) => (follow < 0 ? undefined : i < follow ? "said" : i === follow ? "current" : undefined);
+  const lineCls = (i: number) =>
+    cn(
+      "transition-[opacity,background-color] duration-200",
+      lineState(i) === "said" && "opacity-45",
+      lineState(i) === "current" && "-mx-1.5 rounded-md bg-you/[0.14] px-1.5",
+    );
   return (
     <>
       {parsed.headline ? (
-        <p className="text-[17px] font-semibold leading-[1.45] tracking-[-0.005em] text-foreground">
+        <p
+          data-say-line={0}
+          data-say-current={lineState(0) === "current" ? "" : undefined}
+          className={cn("text-[17px] font-semibold leading-[1.45] tracking-[-0.005em] text-foreground", lineCls(0))}
+        >
           <InlineMd text={parsed.headline} />
         </p>
       ) : null}
       {points ? (
         <ul className="mt-2 space-y-1.5">
           {points.map((pt, i) => (
-            <li key={i} className="flex gap-2.5 text-[15px] leading-[1.5] text-foreground/90">
+            <li
+              key={i}
+              data-say-line={i + 1}
+              data-say-current={lineState(i + 1) === "current" ? "" : undefined}
+              className={cn("flex gap-2.5 text-[15px] leading-[1.5] text-foreground/90", lineCls(i + 1))}
+            >
               <span aria-hidden className="mt-[0.6em] size-1.5 shrink-0 rounded-full bg-foreground/35" />
               <span className="min-w-0">
                 <InlineMd text={pt} />

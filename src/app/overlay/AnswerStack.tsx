@@ -1,19 +1,25 @@
 import { ArrowDown, KeyRound } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { parseAnswer, talkingPoints } from "@/core/ai/answer";
 import { Kbd } from "@/components/common";
 import { MODE_META } from "@/core/defaults";
-import { useCards } from "@/core/live/cards";
+import { useCards, type Card } from "@/core/live/cards";
+import { NO_PROGRESS, speechProgress, type SpeechProgress } from "@/core/live/follow";
 import { useLive } from "@/core/live/session";
+import { segments } from "@/core/live/transcript";
 import { useKeys, useSettings, useShortcutHealth } from "@/core/settings";
 import { ModeIcon } from "../shared/modes";
 import { AnswerCard } from "./AnswerCard";
-import { openDashboard } from "./controller";
+import { fitOverlayHeight, openDashboard } from "./controller";
+import { useOverlay } from "./store";
 
 export function AnswerStack() {
   const cards = useCards((s) => s.cards);
   const last = cards[cards.length - 1];
-  const version = `${cards.length}:${last?.id}:${last?.content.length}:${last?.status}`;
-  const { ref, following, follow } = useFollowNewest(last?.id, version);
+  const progress = useSpeechProgress(last);
+  const version = `${cards.length}:${last?.id}:${last?.content.length}:${last?.status}:${progress.line}`;
+  const { ref, following, follow } = useFollowNewest(last?.id, version, progress);
+  useAutoFit(ref, last, version);
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -24,7 +30,7 @@ export function AnswerStack() {
           <div className="flex flex-col gap-2">
             {cards.map((c) => (
               <div key={c.id} data-card-id={c.id}>
-                <AnswerCard card={c} />
+                <AnswerCard card={c} progress={c.id === last?.id ? progress : undefined} />
               </div>
             ))}
           </div>
@@ -52,11 +58,73 @@ const EDGE_PAD = 10;
  * A new answer jumps into view; scrolling by hand pauses following until the next answer
  * (or "Latest answer").
  */
-function useFollowNewest(lastId: string | undefined, version: string) {
+/**
+ * While listening, follows the user's own voice through the newest answer (what the mic
+ * hears since the answer appeared, matched against its lines).
+ */
+function useSpeechProgress(card: Card | undefined): SpeechProgress {
+  const status = useLive((s) => s.status);
+  const startedAtMs = useLive((s) => s.startedAtMs);
+  const transcript = useLive((s) => s.transcript);
+  const id = card?.id;
+  const content = card?.content ?? "";
+  const kind = card?.kind;
+  const createdAt = card?.createdAt ?? 0;
+  const lines = useMemo(() => {
+    if (!content || kind === "summary") return null;
+    const p = parseAnswer(content);
+    return p.headline ? [p.headline, ...(talkingPoints(p.body) ?? [])] : null;
+  }, [content, kind]);
+  return useMemo(() => {
+    if (!id || !lines || status !== "live" || !startedAtMs) return NO_PROGRESS;
+    // Speech since just before the answer appeared, on the session clock.
+    const from = createdAt - startedAtMs - 1500;
+    const spoken = segments(transcript)
+      .filter((s) => s.source === "me" && s.t1Ms >= from)
+      .map((s) => s.text)
+      .join(" ");
+    return spoken ? speechProgress(lines, spoken) : NO_PROGRESS;
+  }, [id, lines, status, startedAtMs, createdAt, transcript]);
+}
+
+/** Top of `el` in the scroll container's content coordinates. */
+function topIn(scroller: HTMLElement, el: HTMLElement): number {
+  return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+}
+
+/**
+ * Grows the overlay so the newest answer fits without scrolling (up to the screen height),
+ * and returns to the user's own size once it isn't needed.
+ */
+function useAutoFit(ref: React.RefObject<HTMLDivElement | null>, last: Card | undefined, version: string) {
+  const collapsed = useOverlay((s) => s.collapsed);
+  useEffect(() => {
+    if (collapsed) return;
+    const t = setTimeout(() => {
+      const el = ref.current;
+      const winH = useOverlay.getState().win?.bounds.height;
+      if (!el || !winH) return;
+      if (!last) {
+        fitOverlayHeight(0, true);
+        return;
+      }
+      const card = el.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(last.id)}"]`);
+      if (!card) return;
+      const needed = winH - el.clientHeight + card.getBoundingClientRect().height + 2 * EDGE_PAD;
+      const settled = last.status !== "streaming" && last.status !== "thinking" && last.status !== "pending";
+      fitOverlayHeight(needed, settled);
+    }, 120);
+    return () => clearTimeout(t);
+  }, [ref, last, version, collapsed]);
+}
+
+function useFollowNewest(lastId: string | undefined, version: string, progress: SpeechProgress) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
   const followRef = useRef(true);
   const lastIntent = useRef(0);
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
 
   const setFollow = useCallback((v: boolean) => {
     if (followRef.current === v) return;
@@ -69,9 +137,21 @@ function useFollowNewest(lastId: string | undefined, version: string) {
     if (!el || !followRef.current || !lastId) return;
     const card = el.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(lastId)}"]`);
     if (!card) return;
-    const top = card.offsetTop - EDGE_PAD;
-    const bottom = card.offsetTop + card.offsetHeight + EDGE_PAD;
-    const target = Math.max(0, Math.min(top, bottom - el.clientHeight));
+    const cardTop = topIn(el, card);
+    const top = cardTop - EDGE_PAD;
+    const bottom = cardTop + card.offsetHeight + EDGE_PAD;
+    let target = Math.max(0, Math.min(top, bottom - el.clientHeight));
+    // Reading aloud: keep the line being said about a quarter of the way down.
+    const prog = progressRef.current;
+    const current = prog.active ? card.querySelector<HTMLElement>("[data-say-current]") : null;
+    if (prog.active && prog.spoken >= prog.total) {
+      // Finished reading: stay at the end of the answer (follow-up chips), don't jump back up.
+      target = Math.max(0, Math.max(top, bottom - el.clientHeight));
+    } else if (current) {
+      const want = topIn(el, current) - el.clientHeight * 0.25;
+      target = Math.max(top, Math.min(want, bottom - el.clientHeight));
+      target = Math.max(0, Math.max(target, Math.min(top, bottom - el.clientHeight)));
+    }
     if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target;
   }, [lastId]);
 

@@ -194,6 +194,8 @@ let sizeTimer: ReturnType<typeof setTimeout> | null = null;
  * resizes it (never the pill size).
  */
 function rememberPanelSize(width: number, height: number) {
+  // Heights set by auto-fit are temporary; never save them as the user's size.
+  if (autoFit || autoFitBusy) return;
   if (useOverlay.getState().collapsed || width < 300 || height < 200) return;
   if (sizeTimer) clearTimeout(sizeTimer);
   sizeTimer = setTimeout(() => {
@@ -207,10 +209,97 @@ function rememberPanelSize(width: number, height: number) {
   }, 900);
 }
 
+// ---------------------------------------------------------------------------
+// Auto-fit: grow the panel so the newest answer fits without scrolling, then
+// return to the user's own size (and position) once it isn't needed.
+
+let autoFit: { baseHeight: number; baseY: number } | null = null;
+let autoFitBusy = false;
+let autoFitQueued: { needed: number; allowShrink: boolean } | null = null;
+
+const SCREEN_MARGIN = 12;
+
+/**
+ * `needed` is the window height (logical px) that would show the newest answer in full,
+ * or 0 to go back to the user's size. Grows immediately; shrinks only when allowed
+ * (not while an answer is still streaming) to avoid the panel jumping around.
+ */
+export function fitOverlayHeight(needed: number, allowShrink: boolean): void {
+  autoFitQueued = { needed, allowShrink };
+  if (!autoFitBusy) void drainAutoFit();
+}
+
+async function drainAutoFit(): Promise<void> {
+  autoFitBusy = true;
+  try {
+    while (autoFitQueued) {
+      const { needed, allowShrink } = autoFitQueued;
+      autoFitQueued = null;
+      await applyAutoFit(needed, allowShrink);
+    }
+  } finally {
+    autoFitBusy = false;
+  }
+}
+
+async function applyAutoFit(needed: number, allowShrink: boolean): Promise<void> {
+  const { collapsed, win } = useOverlay.getState();
+  if (collapsed || !win) return;
+  const userH = useSettings.getState().settings.overlay.height;
+  const availTop = (window.screen as Screen & { availTop?: number }).availTop ?? 0;
+  const availH = window.screen.availHeight;
+  const maxH = Math.max(userH, availH - 2 * SCREEN_MARGIN);
+  const cur = win.bounds.height;
+  const target = Math.round(Math.min(maxH, Math.max(userH, needed)));
+
+  if (target > cur + 6) {
+    if (!autoFit) autoFit = { baseHeight: cur, baseY: win.bounds.y };
+    const st = await native.windowSetSize({ height: target }).catch(() => null);
+    if (!st) return;
+    useOverlay.setState({ win: st });
+    // Keep the bottom on screen: move up if the taller panel would run off it.
+    const bottom = st.bounds.y + st.bounds.height;
+    const limit = availTop + availH - SCREEN_MARGIN;
+    if (bottom > limit) {
+      const dy = Math.round(limit - bottom);
+      const moved = await native.windowMoveBy(0, dy).catch(() => null);
+      if (moved) useOverlay.setState({ win: moved });
+    }
+  } else if (autoFit && allowShrink && target <= autoFit.baseHeight + 6 && cur > autoFit.baseHeight + 6) {
+    const back = autoFit;
+    autoFit = null;
+    const st = await native.windowSetSize({ height: back.baseHeight }).catch(() => null);
+    if (st) {
+      useOverlay.setState({ win: st });
+      // Back to where it was before it grew (it may have moved up to stay on screen).
+      const dy = Math.round(back.baseY - st.bounds.y);
+      if (Math.abs(dy) > 1) {
+        const moved = await native.windowMoveBy(0, dy).catch(() => null);
+        if (moved) useOverlay.setState({ win: moved });
+      }
+    }
+  } else if (autoFit && allowShrink && target < cur - 24) {
+    // Still taller than the user's size, but less is needed now.
+    const st = await native.windowSetSize({ height: target }).catch(() => null);
+    if (st) useOverlay.setState({ win: st });
+  }
+}
+
+/** Forget auto-fit (e.g. before collapsing) and report the user's own height. */
+function endAutoFit(): number | null {
+  const base = autoFit?.baseHeight ?? null;
+  autoFit = null;
+  autoFitQueued = null;
+  return base;
+}
+
 export async function collapse(): Promise<void> {
   const win = useOverlay.getState().win;
   const s = useSettings.getState().settings.overlay;
-  const savedSize = win ? { width: win.bounds.width, height: win.bounds.height } : { width: s.width, height: s.height };
+  const baseHeight = endAutoFit();
+  const savedSize = win
+    ? { width: win.bounds.width, height: baseHeight ?? win.bounds.height }
+    : { width: s.width, height: s.height };
   useOverlay.setState({ collapsed: true, savedSize });
   await native.windowSetSize(PILL_SIZE).catch(() => {});
 }
