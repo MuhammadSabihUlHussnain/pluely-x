@@ -40,14 +40,24 @@ pub fn emit_app_error<R: Runtime>(app: &AppHandle<R>, code: &str, message: &str)
     );
 }
 
-/// Stop background work and exit.
+/// Stop background work and exit. Safe to call from anywhere (commands run on the async
+/// runtime, the tray handler on the main thread): the session stop is awaited on a spawned
+/// task, never `block_on` inside the runtime (which panicked and left the app running).
 pub fn quit<R: Runtime>(app: &AppHandle<R>) {
+    static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if QUITTING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return; // already on the way out (repeated clicks)
+    }
     tracing::info!("quit requested");
-    // ---- live session (audio/stt/session) — merged from audio branch ----
-    // flush Deepgram (CloseStream, ≤ ~4 s) and broadcast session://status before exiting
-    session::stop_on_exit(app);
-    // ---- end live session ----
-    app.exit(0);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // ---- live session (audio/stt/session) — merged from audio branch ----
+        // flush Deepgram (CloseStream, ≤ ~4 s) and broadcast session://status before exiting
+        session::stop_for_quit(&app).await;
+        // ---- end live session ----
+        tracing::info!("exiting");
+        app.exit(0);
+    });
 }
 
 pub fn open_logs<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {

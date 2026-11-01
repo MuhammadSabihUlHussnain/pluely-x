@@ -248,6 +248,18 @@ pub async fn session_reattach(
 }
 
 /// Exit hook: stop the live session (CloseStream flush) before the process goes away.
+/// Async session stop for the quit path (awaited on the async runtime; see `crate::quit`).
+pub async fn stop_for_quit<R: Runtime>(app: &AppHandle<R>) {
+    let Some(mgr) = app.try_state::<SessionManager>() else {
+        return;
+    };
+    if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(4), mgr.stop()).await {
+        broadcast_status(app, false, None);
+    }
+}
+
+/// Blocking best-effort stop for `RunEvent::Exit` (main thread, outside the async runtime).
+/// Must not be called from inside an async task or command.
 pub fn stop_on_exit<R: Runtime>(app: &AppHandle<R>) {
     let Some(mgr) = app.try_state::<SessionManager>() else {
         return;

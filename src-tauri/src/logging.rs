@@ -66,6 +66,14 @@ pub fn init(log_dir: &Path) -> LogGuard {
         .with(stderr_layer)
         .try_init();
 
+    // Panics (including ones inside async commands, which otherwise vanish silently in a
+    // release build) go to the log file too.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(target: "panic", "{info}");
+        default_hook(info);
+    }));
+
     tracing::info!(version = env!("CARGO_PKG_VERSION"), dir = %log_dir.display(), "logging started");
     LogGuard { _guard: guard }
 }
