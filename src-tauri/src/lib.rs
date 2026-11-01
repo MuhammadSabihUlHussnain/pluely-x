@@ -1,72 +1,185 @@
-// TEMPORARY window spike harness (Step 0). Replaced by the real app wiring afterwards.
-mod error;
+//! Pluely X native layer (Windows). The command/event/channel API is specified in
+//! docs/CONTRACT.md; design notes are in docs/NATIVE_DESIGN.md.
+
+mod db;
+pub mod error;
+mod keys;
+mod llm;
+mod logging;
+mod screen;
+pub mod secrets;
+pub mod settings;
+mod shortcuts;
+mod tray;
 mod window;
 
-use std::io::Write;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+// ---- live session (audio/stt/session) — merged from audio branch ----
+// Wire the session modules in here when the audio branch is merged:
+//   mod audio; mod stt; mod session;
+// plus their managed state in `run()` and their commands in `generate_handler!`
+// (see the markers there). They use `secrets::Secrets`, `error::AppError` and
+// `settings::SettingsState` from this crate.
+// ---- end live session ----
 
-fn spike_log_line(msg: &str) {
-    if let Ok(path) = std::env::var("PLUELYX_SPIKE_LOG") {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-            let fg = window::win32::foreground_window();
-            let _ = writeln!(f, "{} fg={:#x}", msg, fg);
-        }
-    }
+use std::sync::Arc;
+
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime};
+
+use crate::error::{AppError, AppResult};
+use crate::secrets::{KeyringStore, Secrets, KEYRING_SERVICE};
+use crate::settings::SettingsState;
+
+/// Broadcast by the live session on start/stop (contract §3); the tray listens to it.
+pub const EVENT_SESSION_STATUS: &str = "session://status";
+/// Background failures for the overlay (contract §8).
+pub const EVENT_APP_ERROR: &str = "app://error";
+
+pub fn emit_app_error<R: Runtime>(app: &AppHandle<R>, code: &str, message: &str) {
+    let _ = app.emit_to(
+        window::MAIN,
+        EVENT_APP_ERROR,
+        serde_json::json!({ "code": code, "message": message }),
+    );
 }
 
-#[tauri::command]
-async fn spike_log(msg: String) {
-    spike_log_line(&msg);
+/// Stop background work and exit.
+pub fn quit<R: Runtime>(app: &AppHandle<R>) {
+    tracing::info!("quit requested");
+    // ---- live session (audio/stt/session) — merged from audio branch ----
+    // stop the session here (session_stop flushes Deepgram, ≤ 3 s) before exiting
+    // ---- end live session ----
+    app.exit(0);
 }
 
-#[tauri::command]
-async fn spike_cycle(app: tauri::AppHandle, n: u32) -> Result<(), String> {
-    let w = app.get_webview_window("main").ok_or("no main")?;
-    for i in 0..n {
-        w.hide().map_err(|e| e.to_string())?;
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-        w.show().map_err(|e| e.to_string())?;
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-        let hwnd = w.hwnd().map_err(|e| e.to_string())?;
-        let f = window::win32::ex_style_flags(hwnd);
-        spike_log_line(&format!("cycle {} ex={:#x} tool={} app={} noact={}", i, f.raw, f.tool_window, f.app_window, f.no_activate));
+pub fn open_logs<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_log_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| {
+            AppError::new("open_failed", "Couldn't open the logs folder").with_detail(e.to_string())
+        })
+}
+
+fn setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
+    let log_dir = app.path().app_log_dir()?;
+    app.manage(logging::init(&log_dir));
+
+    let config_dir = app.path().app_config_dir()?;
+    app.manage(SettingsState::load(config_dir.join("settings.json")));
+    app.manage(window::OverlayRuntime::new(config_dir));
+
+    let settings = app.state::<SettingsState>().get();
+    window::create_main(app, &settings)?;
+    settings::apply_side_effects(app, None, &settings);
+    if let Err(e) = tray::create(app) {
+        tracing::error!(error = %e, "tray icon failed");
     }
-    spike_log_line("cycle done");
+
+    // ---- live session (audio/stt/session) — merged from audio branch ----
+    // start the session manager / device watcher here if it needs the AppHandle
+    // ---- end live session ----
+
+    tracing::info!("setup complete");
     Ok(())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![spike_log, spike_cycle])
-        .setup(|app| {
-            let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Pluely X")
-                .inner_size(440.0, 560.0)
-                .position(200.0, 120.0)
-                .decorations(false)
-                .transparent(true)
-                .shadow(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .content_protected(true)
-                .resizable(true)
-                .focusable(false)
-                .focused(false)
-                .visible(false)
-                .build()?;
-            let hwnd = w.hwnd()?;
-            let use_subclass = std::env::var("PLUELYX_SPIKE_SUBCLASS").map(|v| v != "0").unwrap_or(true);
-            if use_subclass {
-                let ok = window::win32::install_overlay_subclass(hwnd);
-                spike_log_line(&format!("subclass installed={}", ok));
-            } else {
-                spike_log_line("subclass DISABLED (baseline)");
-            }
-            w.show()?;
-            let f = window::win32::ex_style_flags(hwnd);
-            spike_log_line(&format!("startup hwnd={:#x} ex={:#x} tool={} app={} noact={}", hwnd.0 as isize, f.raw, f.tool_window, f.app_window, f.no_activate));
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = tauri::Builder::default()
+        // must be first: a second launch just shows the existing overlay
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            window::on_second_instance(app);
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations(db::DB_URL, db::migrations())
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| shortcuts::handle(app, shortcut, event))
+                .build(),
+        )
+        .manage(Secrets(Arc::new(KeyringStore::new(KEYRING_SERVICE))))
+        .manage(llm::Http::new())
+        .manage(llm::LlmState::default())
+        .manage(screen::store::ScreenshotStore::default())
+        .manage(screen::RegionState::default())
+        .manage(shortcuts::ShortcutRegistry::default())
+        // ---- live session (audio/stt/session) — merged from audio branch ----
+        // .manage(session::SessionManager::default())
+        // ---- end live session ----
+        .invoke_handler(tauri::generate_handler![
+            // §1 keys
+            keys::keys_status,
+            keys::keys_set,
+            keys::keys_delete,
+            keys::keys_test,
+            // §2 llm
+            llm::llm_stream,
+            llm::llm_cancel,
+            // ---- live session (audio/stt/session) — merged from audio branch ----
+            // §3: audio::audio_list_devices, audio::audio_open_mic_privacy_settings,
+            //     session::session_start, session::session_stop, session::session_set_source,
+            //     session::session_status, session::session_reattach,
+            // ---- end live session ----
+            // §4 window
+            window::window_show,
+            window::window_hide,
+            window::window_toggle,
+            window::window_get_state,
+            window::window_set_size,
+            window::window_set_click_through,
+            window::window_set_content_protection,
+            window::window_set_always_on_top,
+            window::window_begin_typing,
+            window::window_end_typing,
+            window::window_move_by,
+            window::window_reset_position,
+            window::dashboard_open,
+            window::dashboard_toggle,
+            window::app_quit,
+            window::app_open_logs,
+            window::app_version,
+            // §5 screenshots
+            screen::screenshot_full,
+            screen::screenshot_region_start,
+            screen::screenshot_region_commit,
+            screen::screenshot_region_cancel,
+            screen::screenshot_get,
+            screen::screenshot_save,
+            screen::screenshot_load,
+            screen::screenshot_discard,
+            // §6 settings
+            settings::settings_get,
+            settings::settings_update,
+            settings::settings_reset,
+            // §7 shortcuts
+            shortcuts::shortcuts_validate,
+            shortcuts::shortcuts_status,
+            // §8 misc
+            logging::log_write,
+        ])
+        .setup(|app| setup(app.handle()))
+        .build(tauri::generate_context!())
+        .expect("error while building Pluely X");
+
+    app.run(|_app, event| match event {
+        // closing the last window must not quit: the tray keeps the app alive
+        RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
+        RunEvent::Exit => {
+            // ---- live session (audio/stt/session) — merged from audio branch ----
+            // best-effort session stop if quit() wasn't the path taken
+            // ---- end live session ----
+            tracing::info!("exit");
+        }
+        _ => {}
+    });
 }

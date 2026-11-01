@@ -16,10 +16,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, MA_NOACTIVATE, STYLESTRUCT, SWP_ASYNCWINDOWPOS,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
     WINDOWPOS, WM_MOUSEACTIVATE, WM_NCDESTROY, WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
-    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 
 const SUBCLASS_ID: usize = 0x504C_5558; // "PLUX"
+const TOOL_SUBCLASS_ID: usize = 0x504C_5554; // "PLUT"
 
 /// True while the overlay is in typing mode (it may take activation and focus).
 static TYPING: AtomicBool = AtomicBool::new(false);
@@ -70,10 +71,42 @@ unsafe extern "system" fn overlay_subclass_proc(
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
+/// Style-only hook for windows that must still take focus (region-capture overlays): keeps
+/// them tool windows so they never show up in Alt+Tab.
+unsafe extern "system" fn tool_subclass_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _ref_data: usize,
+) -> LRESULT {
+    match msg {
+        WM_STYLECHANGING if wparam.0 as i32 == GWL_EXSTYLE.0 && lparam.0 != 0 => {
+            let ss = &mut *(lparam.0 as *mut STYLESTRUCT);
+            ss.styleNew = (ss.styleNew | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0;
+        }
+        WM_NCDESTROY => {
+            let _ = RemoveWindowSubclass(hwnd, Some(tool_subclass_proc), TOOL_SUBCLASS_ID);
+        }
+        _ => {}
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
+
+/// Must run on the thread that owns the window.
+pub fn install_tool_subclass(hwnd: HWND) -> bool {
+    let ok =
+        unsafe { SetWindowSubclass(hwnd, Some(tool_subclass_proc), TOOL_SUBCLASS_ID, 0) }.as_bool();
+    force_tool_window(hwnd);
+    ok
+}
+
 /// Install the overlay subclass and force the tool-window style. Must run on the thread that
 /// owns the window (the tao main thread).
 pub fn install_overlay_subclass(hwnd: HWND) -> bool {
-    let ok = unsafe { SetWindowSubclass(hwnd, Some(overlay_subclass_proc), SUBCLASS_ID, 0) }.as_bool();
+    let ok =
+        unsafe { SetWindowSubclass(hwnd, Some(overlay_subclass_proc), SUBCLASS_ID, 0) }.as_bool();
     force_tool_window(hwnd);
     ok
 }
@@ -111,30 +144,6 @@ pub fn ensure_topmost(hwnd: HWND) {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS,
         );
-    }
-}
-
-pub fn ex_style(hwnd: HWND) -> isize {
-    unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) }
-}
-
-/// Flags relevant to "is this window in Alt+Tab / non-activating".
-#[derive(Debug, Clone, Copy, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExStyleFlags {
-    pub raw: isize,
-    pub tool_window: bool,
-    pub app_window: bool,
-    pub no_activate: bool,
-}
-
-pub fn ex_style_flags(hwnd: HWND) -> ExStyleFlags {
-    let raw = ex_style(hwnd);
-    ExStyleFlags {
-        raw,
-        tool_window: raw & WS_EX_TOOLWINDOW.0 as isize != 0,
-        app_window: raw & WS_EX_APPWINDOW.0 as isize != 0,
-        no_activate: raw & WS_EX_NOACTIVATE.0 as isize != 0,
     }
 }
 

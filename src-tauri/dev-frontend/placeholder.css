@@ -1,6 +1,5 @@
-html, body { margin: 0; padding: 0; background: rgba(20, 24, 33, 0.92); color: #eee; font: 14px system-ui, sans-serif; }
-.big { position: absolute; left: 0; width: 300px; height: 120px; font-size: 18px; }
-#click { top: 0; }
-#cycle { top: 140px; }
-#text { position: absolute; top: 280px; left: 0; width: 300px; }
-#out { position: absolute; top: 320px; left: 0; white-space: pre-wrap; font-size: 11px; }
+html, body { margin: 0; padding: 8px; background: rgba(20, 24, 33, 0.92); color: #eee; font: 13px system-ui, sans-serif; }
+h1 { font-size: 14px; margin: 0 0 6px; }
+#out { white-space: pre-wrap; font-size: 11px; }
+#text { position: absolute; left: 8px; top: 40px; width: 300px; height: 28px; }
+#out { margin-top: 48px; }
