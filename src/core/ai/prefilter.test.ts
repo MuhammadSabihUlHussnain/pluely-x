@@ -15,6 +15,13 @@ describe("question pre-filter", () => {
     "Do you have any questions for us",
     "And you?",
     "What is a closure in JavaScript",
+    // Requests without a question mark (seen in a real IB technical interview).
+    "EBITDA is four x. Four x. Calculate the net debt amount.",
+    "Calculate the enterprise value",
+    "Estimate the number of gas stations in the US.",
+    "Pitch me a stock.",
+    "Walk through the three statements.",
+    "debt load, interest rate, and SGA?",
   ])("passes %s", (text) => {
     expect(isCandidateQuestion(text)).toBe(true);
   });
@@ -28,6 +35,12 @@ describe("question pre-filter", () => {
     "Priya will own the launch email, due Friday.",
     "",
     "Right",
+    // Setups and logistics: on their own they aren't the question.
+    "If net income",
+    "a hundred,",
+    "EBITDA is $3.50,",
+    "We... Let's say third question.",
+    "Suppose revenue is 10 million.",
   ])("rejects %s", (text) => {
     expect(isCandidateQuestion(text)).toBe(false);
   });

@@ -27,6 +27,7 @@ export const DEFAULT_MODE_PROMPTS: Record<Mode, string> = {
   interview: `Mode: Interview. The user is the candidate in a job interview; "Them" is the interviewer. Answer each interviewer question as the candidate would say it, in the first person, grounded in the résumé and job description in the brief. Never invent employers, titles, dates or numbers that are not in the brief. When the brief lacks a detail, keep the answer believable but general, and add a Note telling the user to swap in their own example.
 - Behavioural questions ("tell me about a time…", "how did you handle…"): tell it as a short story. Line 1 is the point of the story in one sentence. The talking points walk through what was going on, what the user was responsible for, what they did, and how it turned out, one spoken sentence each, with no labels.
 - Technical questions: line 1 gives the correct answer in plain words; the talking points add the trade-offs that show depth.
+- Calculation and case questions (finance technicals, valuation, market sizing, brain teasers): line 1 says the final answer with its number. The talking points walk through the steps in order with the key numbers, and say any assumption you had to make. If a number is missing, say what you would assume.
 - Questions about the role or company: connect the user's experience to the job description.
 Keep each answer short enough to say aloud in under a minute.`,
 
@@ -44,7 +45,7 @@ Prefer the optimal solution; mention a brute-force baseline in one talking point
 export const BRIEF_PREAMBLE =
   "Background the user provided for this session (for example a résumé, job description, agenda or slides). Use it to ground your answers:";
 
-export const AUTO_ANSWER_INSTRUCTION = `If the latest Them turn is not a question or request directed at the user, output exactly ${NULL_SENTINEL} and nothing else. Otherwise answer it now in the answer format, as what the user should say.`;
+export const AUTO_ANSWER_INSTRUCTION = `The latest Them turn may be one question spoken in several pieces; treat it as a single question, and use the transcript for any numbers or details said earlier. If it is not a question or request for the user (small talk; logistics such as "are you ready?", "can you hear me?" or "let's move on"; or a setup the speaker hasn't finished asking yet), output exactly ${NULL_SENTINEL} and nothing else. Otherwise answer it now in the answer format, as what the user should say.`;
 
 export const ASK_NOW_INSTRUCTION =
   "The user pressed “What should I say?”. Using the last two minutes of the conversation above, give the single best thing for the user to say next — usually an answer to the most recent question or request from Them. Use the answer format.";

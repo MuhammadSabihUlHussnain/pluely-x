@@ -1,6 +1,12 @@
 // The question pipeline: decides when to ask Claude, streams answers into
-// cards, drops ∅ (not-a-question) results, cancels superseded auto-answers,
-// never answers the same turn twice, and maps failures to error cards.
+// cards, drops ∅ (not-a-question) results, never answers the same turn twice,
+// and maps failures to error cards.
+//
+// Questions are often spoken in pieces ("If net income is a hundred… P/E eight x…
+// calculate the net debt"), and speech-to-text splits them into several turns. The
+// other side's turns since the user last spoke are therefore merged into one question.
+// A newer turn only replaces an auto-answer that hasn't shown any text yet; an answer
+// the user may already be reading is never cancelled by a later remark.
 
 import { isDecided, isNullAnswer } from "../ai/answer";
 import { lastWindow, type ContextLine } from "../ai/context";
@@ -41,6 +47,9 @@ export interface AskOptions {
   replyTo?: string | null;
 }
 
+/** Pieces of one spoken question are merged when they arrive within this window. */
+const FRAGMENT_WINDOW_MS = 60_000;
+
 export class AnswerPipeline {
   private answeredTurns = new Set<string>();
   /** cardId → requestId of the stream currently feeding it. */
@@ -48,6 +57,13 @@ export class AnswerPipeline {
   private builders = new Map<string, () => Promise<LlmRequest>>();
   private dropped = new Set<string>();
   private autoCardId: string | null = null;
+  /** The other side's turns since the user last spoke (newest last). */
+  private fragments: { seq: number; text: string; t1Ms: number }[] = [];
+  private fragmentSeq = 0;
+  /** Fragments up to this seq already belong to an answer the user has seen. */
+  private consumedSeq = 0;
+  /** cardId → the last fragment seq its question includes. */
+  private cardSeq = new Map<string, number>();
   private running = new Set<Promise<void>>();
   private ids: { request(): string; card(): string };
   private now: () => number;
@@ -59,21 +75,43 @@ export class AnswerPipeline {
 
   /** Called for every `turn` event. Returns true when an auto-answer started. */
   onTurn(turn: TurnEvent): boolean {
-    if (turn.source !== "them") return false;
+    if (turn.source !== "them") {
+      // The user answered or spoke up: the next question starts fresh.
+      if (turn.text.trim().split(/\s+/).length >= 3) {
+        this.fragments = [];
+        this.consumedSeq = this.fragmentSeq;
+      }
+      return false;
+    }
+    if (this.answeredTurns.has(turn.turnId)) return false;
+    this.answeredTurns.add(turn.turnId);
+    const seq = ++this.fragmentSeq;
+    this.fragments = this.fragments.filter((f) => turn.t1Ms - f.t1Ms <= FRAGMENT_WINDOW_MS);
+    if (turn.text.trim()) this.fragments.push({ seq, text: turn.text.trim(), t1Ms: turn.t1Ms });
+
     const mode = this.deps.mode();
     if (!MODE_META[mode].autoAnswers) return false;
-    if (this.answeredTurns.has(turn.turnId)) return false;
-    if (!isCandidateQuestion(turn.text, turn.question)) return false;
-    this.answeredTurns.add(turn.turnId);
 
-    // A newer candidate supersedes the in-flight auto-answer.
-    if (this.autoCardId) this.stop(this.autoCardId);
+    // An auto-answer still deciding (nothing on screen yet) is superseded by a fuller
+    // version of its question; one that is already showing text is left alone.
+    const pending = this.autoCardId ? this.deps.cards.get(this.autoCardId) : undefined;
+    const pendingUnseen = !!pending && !pending.content && this.inflight.has(pending.id);
+    const candidate = isCandidateQuestion(turn.text, turn.question);
+    // A non-question fragment only matters as the continuation of a question being answered.
+    if (!candidate && !pendingUnseen) return false;
 
-    const card = this.newCard("auto", mode, { question: turn.text, turnId: turn.turnId, provisional: true });
+    const question = this.fragments
+      .filter((f) => f.seq > this.consumedSeq)
+      .map((f) => f.text)
+      .join(" ");
+    if (!question) return false;
+    if (pendingUnseen && pending) this.stop(pending.id);
+
+    const card = this.newCard("auto", mode, { question, turnId: turn.turnId, provisional: true });
     this.autoCardId = card.id;
-    const text = turn.text;
+    this.cardSeq.set(card.id, seq);
     this.start(card.id, async () =>
-      buildAutoAnswer(await this.deps.promptContext(mode), this.deps.transcript(), text),
+      buildAutoAnswer(await this.deps.promptContext(mode), this.deps.transcript(), question),
     );
     return true;
   }
@@ -235,6 +273,8 @@ export class AnswerPipeline {
             return;
           }
           decided = true;
+          // The user can see this answer now: its question's pieces are used up.
+          this.consumedSeq = Math.max(this.consumedSeq, this.cardSeq.get(cardId) ?? 0);
         }
         cards.update(cardId, { content: full, status: "streaming", provisional: false });
       },

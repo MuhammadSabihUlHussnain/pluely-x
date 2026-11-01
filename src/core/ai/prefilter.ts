@@ -9,10 +9,18 @@ const AUX_STARTS = [
   "was", "were", "should", "shall", "may", "might",
 ];
 
+// Clause openers that ask the user to do or say something. Setups such as "if…",
+// "given…", "suppose…" or "let's say…" are deliberately absent: on their own they are
+// usually the start of a longer question, which the pipeline merges with what follows.
 const REQUEST_STARTS = [
-  "tell me", "walk me through", "walk us through", "talk me through", "talk about",
-  "describe", "explain", "give me", "give us", "share", "show me", "help me",
-  "name", "list", "define", "compare", "imagine", "suppose", "let's say", "say you",
+  "tell me", "tell us", "walk me through", "walk us through", "talk me through", "talk about",
+  "take me through", "run me through", "go through", "describe", "explain", "give me", "give us",
+  "share", "show me", "help me", "name", "list", "define", "compare", "contrast",
+  "calculate", "compute", "estimate", "solve", "find", "determine", "derive", "figure out",
+  "work out", "value", "price", "forecast", "project", "model", "build", "design", "implement",
+  "write", "code", "sketch", "outline", "summarize", "summarise", "break down", "prove",
+  "analyze", "analyse", "evaluate", "rank", "prioritize", "prioritise", "recommend", "justify",
+  "pitch", "sell me", "convince", "critique", "review", "what if", "how much", "how many",
 ];
 
 const PHRASES = [
@@ -20,7 +28,8 @@ const PHRASES = [
   "how would you", "how do you", "how did you", "what's your", "what is your",
   "what are your", "why did you", "why do you", "do you have", "have you ever",
   "are you familiar", "your experience with", "your thoughts on", "what do you think",
-  "any questions for", "how about you", "and you?",
+  "any questions for", "how about you", "and you?", "calculate", "compute", "estimate the",
+  "walk through", "sell me", "pitch me", "why should we", "what would you", "how would",
 ];
 
 function normalise(text: string): string {

@@ -155,19 +155,67 @@ describe("question pipeline", () => {
     expect(cards.cards[0].status).toBe("done");
   });
 
-  it("keeps a superseded answer that already showed text, marked stopped", async () => {
-    const { pipeline, cards } = setup((_b, n) =>
-      n === 0
-        ? { events: [{ type: "start", requestId: "x", model: "m" }, { type: "text", delta: "Partial answer" }], hang: true }
-        : { events: answer("Second.") },
-    );
+  it("never cancels an answer that is already showing text", async () => {
+    const long = "I'd start with my background in data engineering. ".repeat(6);
+    const { pipeline, cards, transport } = setup((_b, n) => (n === 0 ? { events: answer(long) } : { events: answer("Second.") }));
     pipeline.onTurn(turn("t1", "What's your background?"));
-    for (let i = 0; i < 4; i++) await tick();
-    pipeline.onTurn(turn("t2", "How would you scale it?"));
+    for (let i = 0; i < 6; i++) await tick();
+    expect(cards.cards[0].content.length).toBeGreaterThan(0);
+    pipeline.onTurn(turn("t2", "We... Let's say third question? Okay."));
     await pipeline.idle();
+    expect(transport.cancelled).not.toContain("req1");
     expect(cards.cards.map((c) => [c.turnId, c.status])).toEqual([
-      ["t1", "stopped"],
+      ["t1", "done"],
       ["t2", "done"],
+    ]);
+  });
+
+  it("merges a question spoken in pieces into one question", async () => {
+    const { pipeline, cards, transport } = setup(() => ({ events: answer("Net debt is 50.") }));
+    expect(pipeline.onTurn(turn("t1", "If net income"))).toBe(false);
+    expect(pipeline.onTurn(turn("t2", "a hundred,"))).toBe(false);
+    expect(pipeline.onTurn(turn("t3", "PE ratio is eight x."))).toBe(false);
+    expect(pipeline.onTurn(turn("t4", "EBITDA is four x. Calculate the net debt amount."))).toBe(true);
+    await pipeline.idle();
+    const merged = "If net income a hundred, PE ratio is eight x. EBITDA is four x. Calculate the net debt amount.";
+    expect(cards.cards[0].question).toBe(merged);
+    expect(lastUserText(transport.calls[0].body)).toContain(merged);
+  });
+
+  it("starts fresh after the user speaks", async () => {
+    const { pipeline, cards } = setup(() => ({ events: answer("Sure.") }));
+    pipeline.onTurn(turn("t1", "Thanks for joining."));
+    pipeline.onTurn(turn("m1", "Happy to be here, thanks.", "me"));
+    pipeline.onTurn(turn("t2", "Can you walk me through your resume?"));
+    await pipeline.idle();
+    expect(cards.cards[0].question).toBe("Can you walk me through your resume?");
+  });
+
+  it("restarts an answer that hasn't shown text when the question continues", async () => {
+    const { pipeline, cards, transport } = setup((_b, n) =>
+      n === 0 ? { events: [{ type: "start", requestId: "x", model: "m" }, { type: "thinking" }], hang: true } : { events: answer("Share price is 24.") },
+    );
+    expect(pipeline.onTurn(turn("t1", "Given paper with info, calculate share price given PE"))).toBe(true);
+    await tick();
+    await tick();
+    // The interviewer keeps reading the inputs: not a question on its own, but it continues one.
+    expect(pipeline.onTurn(turn("t2", "EV, EBITDA, revenue, gross margin, tax rate,"))).toBe(true);
+    await pipeline.idle();
+    expect(transport.cancelled).toContain("req1");
+    expect(cards.cards).toHaveLength(1);
+    expect(cards.cards[0].question).toBe("Given paper with info, calculate share price given PE EV, EBITDA, revenue, gross margin, tax rate,");
+  });
+
+  it("doesn't repeat pieces of a question that was already answered", async () => {
+    const { pipeline, cards } = setup(() => ({ events: answer("Answer.") }));
+    pipeline.onTurn(turn("t1", "How would you design a rate limiter?"));
+    await pipeline.idle();
+    pipeline.onTurn(turn("t2", "Great. We use Kafka here."));
+    pipeline.onTurn(turn("t3", "How would you handle backpressure?"));
+    await pipeline.idle();
+    expect(cards.cards.map((c) => c.question)).toEqual([
+      "How would you design a rate limiter?",
+      "Great. We use Kafka here. How would you handle backpressure?",
     ]);
   });
 
