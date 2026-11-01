@@ -137,6 +137,26 @@ type SessionEvent =
 
 **Error codes:** `mic_permission_denied`, `device_not_found`, `device_lost`, `audio_init_failed`, `key_missing`, `dg_auth`, `dg_payment`, `dg_rate_limited`, `dg_bad_request`, `dg_network`, `dg_server`, `dg_timeout`.
 
+*(added at merge)* Command-level codes:
+- `session_active`: `session_start` while a session runs.
+- `no_session`: `session_stop` or `session_set_source` with no session.
+- `invalid_argument`: bad `session_set_source` payload.
+- `open_failed`: the privacy settings page couldn't be opened.
+- `session_ended`.
+
+*(clarified at merge)*
+- **When `session_start` rejects:** only for `key_missing`, `session_active`, or when **every** enabled source failed to open (rejects with the first source's code: `mic_permission_denied` / `device_not_found` / `audio_init_failed`). A **partial start succeeds**: the failed source gets `error {source, fatal:true}` + `state {source, state:"error"}`, and `SessionInfo` omits its `me`/`them`.
+- **Session-level state** (`source: null`) goes `connecting` → `live` (the first source is live) → `error` (every enabled source failed fatally) → `stopping` → `stopped`. Disabling a source ends with `state {source, "idle"}`, plus a `turn {reason:"stop"}` for pending finals.
+- **Stop timing:** `session_stop` can take ~4.1 s worst case (capture stop + 3 s CloseStream flush + socket close).
+- **Clocks:** `startedAtMs` is Unix epoch ms; every event time (`t0Ms`, `t1Ms`, `tMs`, `lastWordEndMs`) is ms since session start.
+- **Connection counters:** `conn` increments on every connection attempt (including failed ones); `stats.reconnects` counts successful reconnections only. Hence a re-enabled source can have segIds like `me-2-0`.
+- **Dropped events:** empty interims/finals are dropped unless they clear an interim already on screen.
+- **Echo:** `echo` is only ever set on `me` finals, and echo text never forms a `me` turn.
+- **Levels:** a source that is disabled or has no open capture reports `null` in `levels`.
+- **AEC:** `SessionInfo.aec` is `"off"` when the mic isn't open.
+- **`session_set_source` `deviceId`:** absent = unchanged, `null` = follow the default, a string = that endpoint (falls back to the default with `device {reason:"fallback"}` if missing, and switches back automatically when it reappears). `muted:true` sends Finalize and stops sending audio, but the meters keep running.
+- **Debug dump:** `PLUELYX_DEBUG_DUMP=1` writes `pluelyx-<sessionId>-<me|them>.wav` (the exact 16 kHz PCM sent to Deepgram) into the app log dir.
+
 **Broadcast:** `session://status` → `{ active: boolean; sessionId?: string }` on start and stop, so the dashboard and tray stay in sync.
 
 ## 4. Window
@@ -294,3 +314,5 @@ Search with e.g. `SELECT t.* FROM transcript_fts f JOIN transcript t ON t.rowid 
 ## Changelog
 
 **2026-11-01 (native foundation):** explicit settings defaults, ranges and merge-patch semantics (§6); `shortcuts_status` (§7); `log_write` (§8); `keys://changed` and a never-rejecting `keys_test` (§1); `key_no_credit`, `keyring_error` and `screenshot_missing` LLM error codes and a never-rejecting `llm_stream` (§2); `dashboard://navigate` and persistence notes for size, flags and placement (§4); format, clamping and route details for screenshots (§5); generic error codes (Conventions); `idx_sessions_started` and the VACUUM note (§9).
+
+**2026-11-01 (live session merge):** §3 command-level error codes (`session_active`, `no_session`, `invalid_argument`, `open_failed`, `session_ended`); when `session_start` rejects and the partial-start behaviour; session-level state machine; stop timing; epoch vs session clocks; `conn` and `reconnects` counters; empty/echo/levels rules; `deviceId` absent/null/string semantics for `session_set_source`; the debug dump. The §3 commands live in the `session` module (`session::audio_list_devices` etc.).
