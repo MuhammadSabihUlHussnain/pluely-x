@@ -1,0 +1,13 @@
+{
+  "type": "Metadata",
+  "transaction_key": "deprecated",
+  "request_id": "7f9c1a52-1e4b-4b8e-9d2f-2b3c4d5e6f70",
+  "sha256": "5324da68ede209a16ac69a38e8cd29cee4d754434a041166cda3a1f5e0b24566",
+  "created": "2026-11-01T14:02:11.517Z",
+  "duration": 12.5,
+  "channels": 1,
+  "models": ["40bd3654-e622-47c4-a111-63a61b23bfe5"],
+  "model_info": {
+    "40bd3654-e622-47c4-a111-63a61b23bfe5": { "name": "general-nova-3", "version": "2025-04-17.21547", "arch": "nova-3" }
+  }
+}

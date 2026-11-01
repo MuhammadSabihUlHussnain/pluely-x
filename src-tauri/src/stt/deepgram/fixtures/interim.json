@@ -1,0 +1,28 @@
+{
+  "type": "Results",
+  "channel_index": [0, 1],
+  "duration": 1.02,
+  "start": 3.5,
+  "is_final": false,
+  "speech_final": false,
+  "channel": {
+    "alternatives": [
+      {
+        "transcript": "so what would you",
+        "confidence": 0.8712,
+        "words": [
+          { "word": "so", "start": 3.58, "end": 3.74, "confidence": 0.91, "punctuated_word": "So" },
+          { "word": "what", "start": 3.74, "end": 3.98, "confidence": 0.88, "punctuated_word": "what" },
+          { "word": "would", "start": 3.98, "end": 4.18, "confidence": 0.86, "punctuated_word": "would" },
+          { "word": "you", "start": 4.18, "end": 4.42, "confidence": 0.84, "punctuated_word": "you" }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "request_id": "7f9c1a52-1e4b-4b8e-9d2f-2b3c4d5e6f70",
+    "model_info": { "name": "general-nova-3", "version": "2025-04-17.21547", "arch": "nova-3" },
+    "model_uuid": "40bd3654-e622-47c4-a111-63a61b23bfe5"
+  },
+  "from_finalize": false
+}

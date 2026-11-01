@@ -1,0 +1,29 @@
+{
+  "type": "Results",
+  "channel_index": [0, 1],
+  "duration": 1.6,
+  "start": 3.5,
+  "is_final": true,
+  "speech_final": false,
+  "channel": {
+    "alternatives": [
+      {
+        "transcript": "So what would you do",
+        "confidence": 0.9634,
+        "words": [
+          { "word": "so", "start": 3.58, "end": 3.74, "confidence": 0.97, "punctuated_word": "So", "speaker": 1, "speaker_confidence": 0.62 },
+          { "word": "what", "start": 3.74, "end": 3.98, "confidence": 0.96, "punctuated_word": "what", "speaker": 1, "speaker_confidence": 0.62 },
+          { "word": "would", "start": 3.98, "end": 4.18, "confidence": 0.95, "punctuated_word": "would", "speaker": 1, "speaker_confidence": 0.6 },
+          { "word": "you", "start": 4.18, "end": 4.42, "confidence": 0.97, "punctuated_word": "you", "speaker": 0, "speaker_confidence": 0.4 },
+          { "word": "do", "start": 4.42, "end": 4.9, "confidence": 0.98, "punctuated_word": "do", "speaker": 1, "speaker_confidence": 0.7 }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "request_id": "7f9c1a52-1e4b-4b8e-9d2f-2b3c4d5e6f70",
+    "model_info": { "name": "general-nova-3", "version": "2025-04-17.21547", "arch": "nova-3" },
+    "model_uuid": "40bd3654-e622-47c4-a111-63a61b23bfe5"
+  },
+  "from_finalize": false
+}

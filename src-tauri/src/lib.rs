@@ -14,11 +14,9 @@ mod tray;
 mod window;
 
 // ---- live session (audio/stt/session) — merged from audio branch ----
-// Wire the session modules in here when the audio branch is merged:
-//   mod audio; mod stt; mod session;
-// plus their managed state in `run()` and their commands in `generate_handler!`
-// (see the markers there). They use `secrets::Secrets`, `error::AppError` and
-// `settings::SettingsState` from this crate.
+mod audio;
+mod session;
+mod stt;
 // ---- end live session ----
 
 use std::sync::Arc;
@@ -46,7 +44,8 @@ pub fn emit_app_error<R: Runtime>(app: &AppHandle<R>, code: &str, message: &str)
 pub fn quit<R: Runtime>(app: &AppHandle<R>) {
     tracing::info!("quit requested");
     // ---- live session (audio/stt/session) — merged from audio branch ----
-    // stop the session here (session_stop flushes Deepgram, ≤ 3 s) before exiting
+    // flush Deepgram (CloseStream, ≤ ~4 s) and broadcast session://status before exiting
+    session::stop_on_exit(app);
     // ---- end live session ----
     app.exit(0);
 }
@@ -76,10 +75,6 @@ fn setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error
     if let Err(e) = tray::create(app) {
         tracing::error!(error = %e, "tray icon failed");
     }
-
-    // ---- live session (audio/stt/session) — merged from audio branch ----
-    // start the session manager / device watcher here if it needs the AppHandle
-    // ---- end live session ----
 
     tracing::info!("setup complete");
     Ok(())
@@ -114,7 +109,7 @@ pub fn run() {
         .manage(screen::RegionState::default())
         .manage(shortcuts::ShortcutRegistry::default())
         // ---- live session (audio/stt/session) — merged from audio branch ----
-        // .manage(session::SessionManager::default())
+        .manage(session::SessionManager::default())
         // ---- end live session ----
         .invoke_handler(tauri::generate_handler![
             // §1 keys
@@ -126,9 +121,14 @@ pub fn run() {
             llm::llm_stream,
             llm::llm_cancel,
             // ---- live session (audio/stt/session) — merged from audio branch ----
-            // §3: audio::audio_list_devices, audio::audio_open_mic_privacy_settings,
-            //     session::session_start, session::session_stop, session::session_set_source,
-            //     session::session_status, session::session_reattach,
+            // §3 live session
+            session::audio_list_devices,
+            session::audio_open_mic_privacy_settings,
+            session::session_start,
+            session::session_stop,
+            session::session_set_source,
+            session::session_status,
+            session::session_reattach,
             // ---- end live session ----
             // §4 window
             window::window_show,
@@ -171,12 +171,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Pluely X");
 
-    app.run(|_app, event| match event {
+    app.run(|app, event| match event {
         // closing the last window must not quit: the tray keeps the app alive
         RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
         RunEvent::Exit => {
             // ---- live session (audio/stt/session) — merged from audio branch ----
-            // best-effort session stop if quit() wasn't the path taken
+            // best-effort session stop if quit() wasn't the path taken (no-op when idle)
+            session::stop_on_exit(app);
             // ---- end live session ----
             tracing::info!("exit");
         }

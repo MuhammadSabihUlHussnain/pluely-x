@@ -1,0 +1,27 @@
+{
+  "type": "Results",
+  "channel_index": [0, 1],
+  "duration": 0.94,
+  "start": 5.1,
+  "is_final": true,
+  "speech_final": true,
+  "channel": {
+    "alternatives": [
+      {
+        "transcript": "differently next time?",
+        "confidence": 0.9811,
+        "words": [
+          { "word": "differently", "start": 5.14, "end": 5.62, "confidence": 0.99, "punctuated_word": "differently" },
+          { "word": "next", "start": 5.62, "end": 5.8, "confidence": 0.98, "punctuated_word": "next" },
+          { "word": "time", "start": 5.8, "end": 6.02, "confidence": 0.97, "punctuated_word": "time?" }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "request_id": "7f9c1a52-1e4b-4b8e-9d2f-2b3c4d5e6f70",
+    "model_info": { "name": "general-nova-3", "version": "2025-04-17.21547", "arch": "nova-3" },
+    "model_uuid": "40bd3654-e622-47c4-a111-63a61b23bfe5"
+  },
+  "from_finalize": true
+}
