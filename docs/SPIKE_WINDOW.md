@@ -48,10 +48,22 @@ An automated PowerShell + user32 harness (per-monitor-DPI-aware, so all coordina
 
 ## Re-running
 
+The spike's temporary commands are gone; `src-tauri/dev-frontend/` is now a smoke-runner page that drives the real commands and reports each result through `log_write` as `SMOKE <step> <json>` lines in `%LOCALAPPDATA%\com.sabih.pluelyx\logs\`. Build it with:
+
 ```powershell
 # from src-tauri, with the placeholder frontend embedded
 $env:CARGO_BUILD_JOBS=4; $env:TAURI_CONFIG='{"build":{"frontendDist":"dev-frontend"}}'
-cargo build --features tauri/custom-protocol
+cargo build --features tauri/custom-protocol      # -> target\debug\pluelyx.exe
 ```
 
-The harness itself is a throwaway script (not committed); its steps are listed under Method.
+The external harness (Notepad as the foreground app, user32 clicks/keys, style and display-affinity checks) was a throwaway script; its steps are listed under Method.
+
+## Follow-up: foundation smoke test (same day, full native layer)
+
+With the real `window/` module the same properties held, and typing mode was added to the checks:
+
+- Overlay at launch: `0x08000198` (tool window, not in Alt+Tab), affinity `0x11`, Notepad keeps the foreground.
+- 6 hide/show toggles via the global hotkey: never took focus, style unchanged. (While hidden, `GetWindowDisplayAffinity` reads `0`; it reads `0x11` again as soon as the window is shown.)
+- `focus_input` hotkey → overlay becomes foreground (`WS_EX_NOACTIVATE` dropped) → Esc → `window_end_typing({restoreFocus:true})` → Notepad is foreground again, `WS_EX_NOACTIVATE` back.
+- Click in the ask box (the click lands in the WebView2 process, not ours) → `window_begin_typing` → overlay is foreground → typed `xyz` arrived in the input → Enter → focus back to Notepad.
+- Region-capture overlays and the dashboard also report affinity `0x11`. The capture overlays initially showed up in Alt+Tab (`APPWINDOW`); a style-only subclass (`win32::install_tool_subclass`) now keeps them tool windows while still letting them take focus.
