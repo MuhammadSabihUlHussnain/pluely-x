@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAnswer, isNullAnswer } from "./answer";
+import { parseAnswer, isNullAnswer, speakableText, talkingPoints } from "./answer";
 import { describeSessionError, isCancellation, mapLlmError } from "./errors";
 
 describe("error mapping", () => {
@@ -66,6 +66,27 @@ describe("answer parsing", () => {
     const p = parseAnswer("Approach.\n- idea\n```python\npass\n```");
     expect(p.body).toBe("- idea");
     expect(p.details).toBe("```python\npass\n```");
+  });
+
+  it("keeps a private Note out of the spoken talking points", () => {
+    const p = parseAnswer(
+      "I'm proud of the pipeline I rebuilt last year.\n- It kept failing overnight.\n- I added checks and alerts.\nNote: Swap in your own project and numbers.",
+    );
+    expect(p.body).toBe("- It kept failing overnight.\n- I added checks and alerts.");
+    expect(p.note).toBe("Swap in your own project and numbers.");
+    expect(parseAnswer("Say this.\n- a\n- **Note:** tip").note).toBe("tip");
+    expect(parseAnswer("Say this.\n- a").note).toBeNull();
+  });
+
+  it("builds the speakable text from the opening line and talking points only", () => {
+    const p = parseAnswer(
+      "I'd use a **token bucket** per API key.\n- Store counts in `Redis`.\n- Return a 429 with Retry-After.\nNote: mention tiers if asked.\n\nDetails\n```py\nx = 1\n```",
+    );
+    expect(speakableText(p)).toBe(
+      "I'd use a token bucket per API key.\nStore counts in Redis.\nReturn a 429 with Retry-After.",
+    );
+    expect(talkingPoints("- a\n- b")).toEqual(["a", "b"]);
+    expect(talkingPoints("Some prose\n- a")).toBeNull();
   });
 
   it("handles answers that open with a bullet or code", () => {

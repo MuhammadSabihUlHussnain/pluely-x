@@ -1,8 +1,8 @@
-import { AlertCircle, ChevronRight, CornerDownRight, ShieldAlert, Square, X } from "lucide-react";
+import { AlertCircle, ChevronRight, CornerDownRight, Lightbulb, ShieldAlert, Square, X } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { CopyButton, IconButton, InlineMd } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
-import { parseAnswer } from "@/core/ai/answer";
+import { parseAnswer, speakableText, talkingPoints, type ParsedAnswer } from "@/core/ai/answer";
 import type { FollowupChip } from "@/core/ai/prompts";
 import { summaryToMarkdown } from "@/core/db/markdown";
 import { cardSink, type Card } from "@/core/live/cards";
@@ -103,16 +103,7 @@ function AnswerBody({ card }: { card: Card }) {
 
   return (
     <div>
-      {parsed.headline ? (
-        <p className="text-[16px] font-semibold leading-[1.4] tracking-[-0.005em] text-foreground">
-          <InlineMd text={parsed.headline} />
-        </p>
-      ) : null}
-      {parsed.body ? (
-        <Markdown isStreaming={streaming && !parsed.details} className="mt-1.5">
-          {parsed.body}
-        </Markdown>
-      ) : null}
+      <SpokenAnswer parsed={parsed} streaming={streaming} />
       {parsed.details ? (
         <div className="mt-2">
           <button
@@ -182,8 +173,57 @@ function Chips({ card }: { card: Card }) {
         Follow-up
       </button>
       <span className="flex-1" />
-      <CopyButton text={card.content} />
+      <CopyButton text={copyText(card.content)} />
     </div>
+  );
+}
+
+/** Copy what the user would say (no Markdown, no private note); fall back to the raw answer. */
+function copyText(content: string): string {
+  const p = parseAnswer(content);
+  return p.headline ? speakableText(p) : content;
+}
+
+/**
+ * The part of an answer meant to be read out: a large opening line, then the talking points
+ * as roomy, high-contrast lines (not muted prose), then the private note set apart so it is
+ * never read out by accident.
+ */
+export function SpokenAnswer({ parsed, streaming }: { parsed: ParsedAnswer; streaming: boolean }) {
+  const points = useMemo(() => talkingPoints(parsed.body), [parsed.body]);
+  return (
+    <>
+      {parsed.headline ? (
+        <p className="text-[17px] font-semibold leading-[1.45] tracking-[-0.005em] text-foreground">
+          <InlineMd text={parsed.headline} />
+        </p>
+      ) : null}
+      {points ? (
+        <ul className="mt-2 space-y-1.5">
+          {points.map((pt, i) => (
+            <li key={i} className="flex gap-2.5 text-[15px] leading-[1.5] text-foreground/90">
+              <span aria-hidden className="mt-[0.6em] size-1.5 shrink-0 rounded-full bg-foreground/35" />
+              <span className="min-w-0">
+                <InlineMd text={pt} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : parsed.body ? (
+        <Markdown isStreaming={streaming && !parsed.details} className="mt-1.5">
+          {parsed.body}
+        </Markdown>
+      ) : null}
+      {parsed.note ? (
+        <p className="mt-2.5 flex gap-1.5 text-[12.5px] leading-snug text-subtle">
+          <Lightbulb className="mt-px size-3.5 shrink-0" aria-hidden />
+          <span>
+            <span className="font-medium">Note to you, not to say: </span>
+            {parsed.note}
+          </span>
+        </p>
+      ) : null}
+    </>
   );
 }
 

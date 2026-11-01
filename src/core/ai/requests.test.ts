@@ -179,3 +179,14 @@ describe("request builders", () => {
     expect((summary.body.output_config?.format?.schema as { required: string[] }).required).toContain("follow_up_email");
   });
 });
+
+describe("spoken answer format", () => {
+  it("asks for speakable answers with a separate private note", async () => {
+    const { BASE_SYSTEM, DEFAULT_MODE_PROMPTS: P } = await import("./prompts");
+    expect(BASE_SYSTEM).toMatch(/read aloud word for word/);
+    expect(BASE_SYSTEM).toMatch(/Note: /);
+    expect(BASE_SYSTEM).toMatch(/Never start a talking point with a label/);
+    expect(P.interview).not.toMatch(/Situation, Task, Action and Result/);
+    expect(P.interview).toMatch(/Note telling the user to swap in their own example/);
+  });
+});

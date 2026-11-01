@@ -1,11 +1,11 @@
 import { ArrowDown, KeyRound } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Kbd } from "@/components/common";
 import { MODE_META } from "@/core/defaults";
 import { useCards } from "@/core/live/cards";
 import { useLive } from "@/core/live/session";
 import { useKeys, useSettings, useShortcutHealth } from "@/core/settings";
 import { ModeIcon } from "../shared/modes";
-import { useStickToBottom } from "../shared/useStickToBottom";
 import { AnswerCard } from "./AnswerCard";
 import { openDashboard } from "./controller";
 
@@ -13,25 +13,27 @@ export function AnswerStack() {
   const cards = useCards((s) => s.cards);
   const last = cards[cards.length - 1];
   const version = `${cards.length}:${last?.id}:${last?.content.length}:${last?.status}`;
-  const { ref, pinned, scrollToBottom } = useStickToBottom<HTMLDivElement>(version);
+  const { ref, following, follow } = useFollowNewest(last?.id, version);
 
   return (
     <div className="relative min-h-0 flex-1">
-      <div ref={ref} className="h-full overflow-y-auto px-2.5 py-2.5 [overflow-anchor:none]" aria-label="Answers" role="log">
+      <div ref={ref} className="relative h-full overflow-y-auto px-2.5 py-2.5 [overflow-anchor:none]" aria-label="Answers" role="log">
         {cards.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="flex flex-col gap-2">
             {cards.map((c) => (
-              <AnswerCard key={c.id} card={c} />
+              <div key={c.id} data-card-id={c.id}>
+                <AnswerCard card={c} />
+              </div>
             ))}
           </div>
         )}
       </div>
-      {!pinned && cards.length > 0 ? (
+      {!following && cards.length > 0 ? (
         <button
           type="button"
-          onClick={scrollToBottom}
+          onClick={follow}
           className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-popover px-3 py-1 text-[12.5px] text-muted-foreground shadow-lg hover:text-foreground"
         >
           <ArrowDown className="size-3.5" /> Latest answer
@@ -39,6 +41,94 @@ export function AnswerStack() {
       ) : null}
     </div>
   );
+}
+
+const USER_INTENT_MS = 600;
+const EDGE_PAD = 10;
+
+/**
+ * Follows the newest answer for reading aloud: shows as much of it as fits but never scrolls
+ * past its first line, so the opening sentence stays in view while the rest streams in.
+ * A new answer jumps into view; scrolling by hand pauses following until the next answer
+ * (or "Latest answer").
+ */
+function useFollowNewest(lastId: string | undefined, version: string) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [following, setFollowing] = useState(true);
+  const followRef = useRef(true);
+  const lastIntent = useRef(0);
+
+  const setFollow = useCallback((v: boolean) => {
+    if (followRef.current === v) return;
+    followRef.current = v;
+    setFollowing(v);
+  }, []);
+
+  const align = useCallback(() => {
+    const el = ref.current;
+    if (!el || !followRef.current || !lastId) return;
+    const card = el.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(lastId)}"]`);
+    if (!card) return;
+    const top = card.offsetTop - EDGE_PAD;
+    const bottom = card.offsetTop + card.offsetHeight + EDGE_PAD;
+    const target = Math.max(0, Math.min(top, bottom - el.clientHeight));
+    if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target;
+  }, [lastId]);
+
+  // A new answer always comes into view.
+  useEffect(() => {
+    if (!lastId) return;
+    followRef.current = true;
+    setFollowing(true);
+  }, [lastId]);
+
+  useEffect(() => {
+    align();
+  }, [version, align]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const intent = () => (lastIntent.current = performance.now());
+    const onKey = (e: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) intent();
+    };
+    const onScroll = () => {
+      if (performance.now() - lastIntent.current < USER_INTENT_MS) setFollow(false);
+      else align(); // layout moved; keep the newest answer's start in view
+    };
+    el.addEventListener("wheel", intent, { passive: true });
+    el.addEventListener("touchmove", intent, { passive: true });
+    el.addEventListener("pointerdown", intent, { passive: true });
+    el.addEventListener("keydown", onKey);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    // Content that grows after render (Streamdown, shiki, images) re-aligns.
+    const ro = new ResizeObserver(() => align());
+    ro.observe(el);
+    const mo = new MutationObserver(() => {
+      for (const child of Array.from(el.children)) ro.observe(child);
+      align();
+    });
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => {
+      el.removeEventListener("wheel", intent);
+      el.removeEventListener("touchmove", intent);
+      el.removeEventListener("pointerdown", intent);
+      el.removeEventListener("keydown", onKey);
+      el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [align, setFollow]);
+
+  const follow = useCallback(() => {
+    followRef.current = true;
+    setFollowing(true);
+    requestAnimationFrame(() => align());
+  }, [align]);
+
+  return { ref, following, follow };
 }
 
 function EmptyState() {

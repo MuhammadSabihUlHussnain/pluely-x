@@ -1,10 +1,11 @@
 import { Download, Image as ImageIcon, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CopyButton, InlineMd, Kbd } from "@/components/common";
+import { CopyButton, Kbd } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { Button } from "@/components/ui/button";
-import { parseAnswer } from "@/core/ai/answer";
+import { parseAnswer, speakableText } from "@/core/ai/answer";
+import { SpokenAnswer } from "@/app/overlay/AnswerCard";
 import { getRepo, type CardRow, type SessionDetail, type SessionListItem } from "@/core/db";
 import { downloadText, notesToMarkdown, parseSummary, safeFilename, sessionTitle, sessionToMarkdown, summaryToMarkdown } from "@/core/db/markdown";
 import { MODE_META } from "@/core/defaults";
@@ -317,15 +318,10 @@ function SavedCard({ card }: { card: CardRow }) {
           </p>
           {card.question ? <p className="text-[13.5px] text-muted-foreground">{card.question}</p> : null}
         </div>
-        <CopyButton text={card.content} />
+        <CopyButton text={p.headline ? speakableText(p) : card.content} />
       </header>
       {showImg && img ? <img src={img} alt="Screenshot, full size" className="mb-3 w-full rounded-lg border border-border" /> : null}
-      {p.headline ? (
-        <p className="text-[16px] font-semibold leading-snug">
-          <InlineMd text={p.headline} />
-        </p>
-      ) : null}
-      {p.body ? <Markdown className="mt-1.5">{p.body}</Markdown> : null}
+      <SpokenAnswer parsed={p} streaming={false} />
       {p.details ? (
         <details className="mt-2">
           <summary className="text-[13px] font-medium text-muted-foreground hover:text-foreground">Details</summary>
