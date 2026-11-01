@@ -1,11 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@plugin "@tailwindcss/typography";
 
-@source "node_modules/streamdown/dist/**/*.{js,ts,jsx,tsx}";
+@source "../node_modules/streamdown/dist/**/*.{js,ts,jsx,tsx}";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -22,188 +25,354 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-subtle: var(--subtle);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+  --color-them: var(--them);
+  --color-you: var(--you);
+  --color-live: var(--live);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-raised: var(--raised);
 }
 
+/* Light (dashboard only, follows Windows' app theme). */
 :root {
   --radius: 0.625rem;
-  --cursor-type: default;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.002 255);
+  --foreground: oklch(0.21 0.012 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.012 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.21 0.012 255);
+  --primary: oklch(0.25 0.014 255);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --secondary: oklch(0.955 0.004 255);
+  --secondary-foreground: oklch(0.25 0.014 255);
+  --muted: oklch(0.955 0.004 255);
+  --muted-foreground: oklch(0.46 0.014 255);
+  --subtle: oklch(0.55 0.012 255);
+  --accent: oklch(0.94 0.006 255);
+  --accent-foreground: oklch(0.21 0.012 255);
+  --raised: oklch(0.975 0.003 255);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.905 0.006 255);
+  --input: oklch(0.88 0.008 255);
+  --ring: oklch(0.55 0.14 240);
+  --them: oklch(0.52 0.12 60);
+  --you: oklch(0.5 0.13 245);
+  --live: oklch(0.58 0.2 27);
+  --ok: oklch(0.52 0.13 155);
+  --warn: oklch(0.55 0.13 75);
+  --danger: oklch(0.55 0.2 27);
+  --code-bg: oklch(0.97 0.004 255);
 }
 
+/* Dark: the overlay always, the dashboard when Windows is in dark mode. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.17 0.008 255);
+  --foreground: oklch(0.965 0.004 255);
+  --card: oklch(0.205 0.009 255);
+  --card-foreground: oklch(0.965 0.004 255);
+  --popover: oklch(0.225 0.01 255);
+  --popover-foreground: oklch(0.965 0.004 255);
+  --primary: oklch(0.94 0.008 255);
+  --primary-foreground: oklch(0.19 0.01 255);
+  --secondary: oklch(0.26 0.011 255);
+  --secondary-foreground: oklch(0.965 0.004 255);
+  --muted: oklch(0.25 0.01 255);
+  --muted-foreground: oklch(0.76 0.012 255);
+  --subtle: oklch(0.66 0.012 255);
+  --accent: oklch(0.28 0.012 255);
+  --accent-foreground: oklch(0.965 0.004 255);
+  --raised: oklch(0.23 0.01 255);
+  --destructive: oklch(0.66 0.19 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.8 0.1 232);
+  --them: oklch(0.84 0.11 75);
+  --you: oklch(0.81 0.095 232);
+  --live: oklch(0.69 0.2 25);
+  --ok: oklch(0.8 0.14 158);
+  --warn: oklch(0.85 0.13 85);
+  --danger: oklch(0.72 0.17 25);
+  --code-bg: oklch(0.15 0.008 255);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
+  }
+  html {
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground font-sans;
+    font-size: 14px;
+    line-height: 1.5;
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+  }
+  body.surface-dashboard {
+    @apply bg-background;
+  }
+  body.surface-overlay,
+  body.surface-capture {
+    background: transparent !important;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--you) 35%, transparent);
+  }
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+  textarea::placeholder,
+  input::placeholder {
+    color: var(--subtle);
+    opacity: 1;
   }
 }
 
-/* Apply global transparency */
-[data-slot="card"] {
-  background-color: rgb(from var(--card) r g b / var(--opacity, 1)) !important;
-  backdrop-filter: var(--backdrop-blur, none);
-}
-
-[data-slot="popover-content"] {
-  background-color: rgb(
-    from var(--popover) r g b / var(--opacity, 1)
-  ) !important;
-  backdrop-filter: var(--backdrop-blur, none);
-}
-
+/* Scrollbars that belong to the palette. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(from var(--muted-foreground) r g b / 0.2) transparent !important;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 28%, transparent) transparent;
 }
-
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
 *::-webkit-scrollbar-track {
-  background: transparent !important;
-  border-radius: 4px;
+  background: transparent;
 }
-
 *::-webkit-scrollbar-thumb {
-  background: rgb(from var(--muted-foreground) r g b / 0.2) !important;
+  background: color-mix(in oklch, var(--muted-foreground) 28%, transparent);
   border-radius: 4px;
-  transition: background-color 0.2s ease;
 }
-
 *::-webkit-scrollbar-thumb:hover {
-  background: rgb(from var(--muted-foreground) r g b / 0.3) !important;
+  background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
 }
 
-*::-webkit-scrollbar-corner {
+/* ---- Overlay glass panel ------------------------------------------------ */
+.glass {
+  background: oklch(0.165 0.01 255 / var(--panel-alpha, 0.88));
+  backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  box-shadow:
+    0 18px 48px -12px rgb(0 0 0 / 0.6),
+    0 2px 6px rgb(0 0 0 / 0.25),
+    inset 0 1px 0 oklch(1 0 0 / 0.06);
+}
+.glass-raised {
+  background: oklch(0.215 0.011 255 / calc(var(--panel-alpha, 0.88) + 0.06));
+  border: 1px solid oklch(1 0 0 / 0.07);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Level meter bars animate with transform only. */
+.meter-bar {
+  transform-origin: bottom;
+  transition: transform 90ms linear;
+}
+
+/* Card entrance + thinking shimmer. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.card-in {
+  animation: card-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes shimmer {
+  0% {
+    background-position: -120% 0;
+  }
+  100% {
+    background-position: 220% 0;
+  }
+}
+.thinking-text {
+  background: linear-gradient(
+    90deg,
+    var(--subtle) 0%,
+    var(--subtle) 35%,
+    var(--foreground) 50%,
+    var(--subtle) 65%,
+    var(--subtle) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.8s linear infinite;
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+.interim {
+  color: var(--subtle);
+  transition: color 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in,
+  .thinking-text,
+  .live-dot {
+    animation: none;
+  }
+  .thinking-text {
+    color: var(--subtle);
+  }
+  .meter-bar {
+    transition: none;
+  }
+}
+
+/* ---- Answer markdown ------------------------------------------------------ */
+.answer-prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-bullets: var(--subtle);
+  --tw-prose-counters: var(--subtle);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-links: var(--you);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: none;
+  color: var(--foreground);
+}
+.answer-prose :where(p, ul, ol, pre, blockquote, table) {
+  margin-top: 0.4em;
+  margin-bottom: 0.4em;
+}
+.answer-prose :where(li) {
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
+  padding-inline-start: 0.2em;
+}
+.answer-prose :where(ul, ol) {
+  padding-inline-start: 1.15em;
+}
+.answer-prose :where(:first-child) {
+  margin-top: 0;
+}
+.answer-prose :where(code):not(:where(pre code)) {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--foreground) 9%, transparent);
+}
+.answer-prose :where(code):not(:where(pre code))::before,
+.answer-prose :where(code):not(:where(pre code))::after {
+  content: none;
+}
+.answer-prose :where(h1, h2, h3, h4) {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 0.8em;
+  margin-bottom: 0.3em;
+}
+
+/* Streamdown code blocks */
+[data-streamdown="code-block"] {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--code-bg) !important;
+}
+[data-streamdown="code-block"] > div:first-child {
   background: transparent !important;
 }
-
-* {
-  cursor: var(--cursor-type) !important;
+[data-streamdown="code-block"] pre,
+[data-streamdown="code-block"] code {
+  font-family: var(--font-mono) !important;
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+  max-width: 100% !important;
+  background: transparent !important;
 }
-
-html {
-  overscroll-behavior: none;
+[data-streamdown="code-block"] pre {
+  overflow-x: auto !important;
+  white-space: pre !important;
 }
-
-body {
-  position: fixed;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-/* Streamdown code block styling */
 [data-streamdown="code-block"] code {
   color: inherit !important;
 }
-
 .dark [data-streamdown="code-block"] code span {
   color: var(--shiki-dark) !important;
 }
-
-/* Fallback for code text color in dark mode */
-.dark [data-streamdown="code-block"] code {
-  color: oklch(0.985 0 0) !important;
-}
-
-/* Fix viewport overflow for markdown content */
-[data-streamdown="code-block"],
 [data-streamdown="table"] {
   max-width: 100% !important;
   overflow-x: auto !important;
 }
 
-[data-streamdown="code-block"] pre,
-[data-streamdown="code-block"] code {
-  max-width: 100% !important;
-  overflow-x: auto !important;
-  word-wrap: break-word !important;
-  white-space: pre-wrap !important;
+#root {
+  height: 100%;
+}
+
+/* Browser mock only: a stand-in desktop behind the transparent overlay. */
+body.surface-overlay.mock-backdrop {
+  background:
+    radial-gradient(120% 80% at 20% 10%, oklch(0.62 0.06 230) 0%, transparent 60%),
+    radial-gradient(90% 70% at 90% 90%, oklch(0.55 0.07 300) 0%, transparent 55%),
+    oklch(0.42 0.03 250) !important;
+}
+
+/* Streamdown lists: hanging indent and tight rhythm for glanceable bullets. */
+.answer-prose ul,
+.answer-prose ol {
+  list-style-position: outside !important;
+  padding-inline-start: 1.15em !important;
+}
+.answer-prose li[data-streamdown="list-item"] {
+  padding-top: 1px !important;
+  padding-bottom: 1px !important;
+}
+.answer-prose li::marker {
+  color: var(--subtle);
 }
