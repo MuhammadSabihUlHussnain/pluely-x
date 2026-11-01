@@ -14,6 +14,7 @@ import type {
   BetaTextBlockParam,
   MessageCreateParamsBase,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
+import { BRIEF_MAX_CHARS } from "../briefs/sources";
 import type { AppSettings, Effort, Mode } from "../types";
 import { formatTranscript, type ContextLine } from "./context";
 import {
@@ -49,7 +50,8 @@ export const BUDGET = {
   history: 12_000,
   notesTranscript: 24_000,
   summaryTranscript: 200_000,
-  briefMax: 60_000,
+  /** Safety net only: saved briefs are already fitted fairly to this (see core/briefs/sources). */
+  briefMax: BRIEF_MAX_CHARS,
 } as const;
 
 export interface PromptContext {

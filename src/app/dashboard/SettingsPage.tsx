@@ -1,4 +1,4 @@
-import { FileUp, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { AlertCircle, FileText, FileUp, Loader2, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Kbd } from "@/components/common";
@@ -10,7 +10,16 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_MODE_PROMPTS } from "@/core/ai/prompts";
 import { BRIEF_ACCEPT, extractBriefText } from "@/core/briefs/extract";
-import { getRepo, type BriefFile, type BriefRow } from "@/core/db";
+import {
+  approxTokens,
+  BRIEF_MAX_CHARS,
+  composeBrief,
+  parseSources,
+  serializeSources,
+  sourceNames,
+  type BriefDoc,
+} from "@/core/briefs/sources";
+import { getRepo, type BriefRow } from "@/core/db";
 import { downloadText, sessionToMarkdown } from "@/core/db/markdown";
 import { DEFAULT_SHORTCUTS, MODE_META, MODEL_OPTIONS, SHORTCUT_LABELS } from "@/core/defaults";
 import { native } from "@/core/native";
@@ -638,7 +647,15 @@ function BriefManager({ briefs, onChange }: { briefs: BriefRow[]; onChange: () =
 
   const startNew = () => {
     const now = Date.now();
-    setEditing({ id: newId("brief"), name: "", mode: null, content: "", filesJson: "[]", createdAt: now, updatedAt: now });
+    setEditing({
+      id: newId("brief"),
+      name: "",
+      mode: null,
+      content: "",
+      filesJson: serializeSources({ notes: "", docs: [] }),
+      createdAt: now,
+      updatedAt: now,
+    });
   };
 
   return (
@@ -651,6 +668,7 @@ function BriefManager({ briefs, onChange }: { briefs: BriefRow[]; onChange: () =
       </div>
       {editing ? (
         <BriefEditor
+          key={editing.id}
           brief={editing}
           onCancel={() => setEditing(null)}
           onSaved={async () => {
@@ -661,19 +679,19 @@ function BriefManager({ briefs, onChange }: { briefs: BriefRow[]; onChange: () =
       ) : null}
       {briefs.length === 0 && !editing ? (
         <p className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-center text-[13.5px] text-muted-foreground">
-          No briefs yet. Add your résumé and the job description before an interview, or an agenda before a meeting.
+          No briefs yet. Add your résumé and the job description before an interview, or an agenda and slides before a meeting.
         </p>
       ) : (
         <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-card">
           {briefs.map((b) => {
-            const files = safeFiles(b.filesJson);
+            const names = sourceNames(b);
             return (
               <li key={b.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-medium">{b.name}</p>
                   <p className="truncate text-[12.5px] text-muted-foreground">
-                    {b.content.length.toLocaleString()} characters
-                    {files.length ? ` · ${files.map((f) => f.name).join(", ")}` : ""}
+                    {names.length ? `${names.length} file${names.length === 1 ? "" : "s"}: ${names.join(", ")}` : "Pasted text"}
+                    {` · ~${approxTokens(b.content.length).toLocaleString()} tokens`}
                     {b.mode ? ` · default for ${MODE_META[b.mode].label}` : ""}
                   </p>
                 </div>
@@ -689,46 +707,92 @@ function BriefManager({ briefs, onChange }: { briefs: BriefRow[]; onChange: () =
   );
 }
 
-function safeFiles(json: string): BriefFile[] {
-  try {
-    return JSON.parse(json) as BriefFile[];
-  } catch {
-    return [];
-  }
+interface PendingFile {
+  key: string;
+  name: string;
+  state: "reading" | "error";
+  error?: string;
 }
 
+const fmtSize = (bytes: number) =>
+  bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
 function BriefEditor({ brief, onCancel, onSaved }: { brief: BriefRow; onCancel: () => void; onSaved: () => Promise<void> }) {
+  const initial = useMemo(() => parseSources(brief), [brief]);
   const [name, setName] = useState(brief.name);
-  const [content, setContent] = useState(brief.content);
-  const [files, setFiles] = useState<BriefFile[]>(safeFiles(brief.filesJson));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [notes, setNotes] = useState(initial.notes);
+  const [docs, setDocs] = useState<BriefDoc[]>(initial.docs);
+  const [pending, setPending] = useState<PendingFile[]>([]);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const isNew = useMemo(() => !brief.name && !brief.content, [brief]);
 
-  const onFiles = async (list: FileList | null) => {
-    if (!list?.length) return;
-    setBusy(true);
-    setError(null);
-    try {
-      for (const f of Array.from(list)) {
-        const r = await extractBriefText(f);
-        setContent((c) => (c.trim() ? `${c.trim()}\n\n--- ${r.name} ---\n${r.text}` : r.text));
-        setFiles((fs) => [...fs, { name: r.name, size: r.size, chars: r.text.length }]);
-        if (!name.trim()) setName(r.name.replace(/\.[^.]+$/, ""));
+  const composed = useMemo(() => composeBrief({ notes, docs }), [notes, docs]);
+  const reading = pending.some((p) => p.state === "reading");
+
+  // Files are read one after another (so the list keeps the order you picked them in),
+  // each on its own: one bad file never stops the others.
+  const addFiles = async (list: FileList | File[] | null) => {
+    const files = Array.from(list ?? []);
+    if (fileInput.current) fileInput.current.value = "";
+    if (!files.length) return;
+    if (!name.trim() && files.length === 1) setName(files[0].name.replace(/\.[^.]+$/, ""));
+    const queued = files.map((f) => ({ key: newId("file"), file: f }));
+    setPending((p) => [...p, ...queued.map(({ key, file }) => ({ key, name: file.name, state: "reading" as const }))]);
+    for (const { key, file } of queued) {
+      try {
+        const r = await extractBriefText(file);
+        setDocs((ds) => [
+          // Re-adding the same file replaces the old copy.
+          ...ds.filter((d) => !(d.name === r.name && d.size === r.size)),
+          { id: newId("doc"), name: r.name, size: r.size, pages: r.pages, text: r.text },
+        ]);
+        setPending((p) => p.filter((x) => x.key !== key));
+      } catch (e) {
+        setPending((p) => p.map((x) => (x.key === key ? { ...x, state: "error", error: (e as Error).message } : x)));
       }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-      if (fileInput.current) fileInput.current.value = "";
     }
   };
 
+  const save = async () => {
+    setSaving(true);
+    try {
+      await getRepo().saveBrief({
+        ...brief,
+        name: name.trim(),
+        content: composed.content,
+        filesJson: serializeSources({ notes, docs }),
+        updatedAt: Date.now(),
+      });
+      await onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const trimmedParts = composed.trimmed.docs.filter((n) => n > 0).length + (composed.trimmed.notes > 0 ? 1 : 0);
+
   return (
-    <div className="mt-3 rounded-xl border border-border bg-card p-4">
-      <div className="flex flex-col gap-3">
+    <div
+      className={cn("mt-3 rounded-xl border bg-card p-4 transition-colors", dragging ? "border-you bg-you/5" : "border-border")}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void addFiles(e.dataTransfer.files);
+      }}
+    >
+      <div className="flex flex-col gap-4">
         <div>
           <label htmlFor="brief-name" className="text-[13px] font-medium">
             Name
@@ -741,11 +805,10 @@ function BriefEditor({ brief, onCancel, onSaved }: { brief: BriefRow; onCancel: 
             className="mt-1 h-10 text-[13.5px]"
           />
         </div>
+
         <div>
           <div className="flex items-center gap-2">
-            <label htmlFor="brief-content" className="flex-1 text-[13px] font-medium">
-              Text
-            </label>
+            <p className="flex-1 text-[13px] font-medium">Documents</p>
             <input
               ref={fileInput}
               type="file"
@@ -753,42 +816,124 @@ function BriefEditor({ brief, onCancel, onSaved }: { brief: BriefRow; onCancel: 
               multiple
               className="sr-only"
               id="brief-file"
-              onChange={(e) => void onFiles(e.target.files)}
+              onChange={(e) => void addFiles(e.target.files)}
             />
-            <Button size="sm" variant="outline" onClick={() => fileInput.current?.click()} disabled={busy}>
-              {busy ? <Loader2 className="animate-spin" /> : <FileUp />}
-              {busy ? "Reading…" : "Add file (PDF, DOCX, TXT, MD)"}
+            <Button size="sm" variant="outline" onClick={() => fileInput.current?.click()}>
+              <FileUp /> Add files
             </Button>
           </div>
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            className="mt-2 flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-border px-4 py-4 text-center text-[13px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+          >
+            <span className="font-medium text-foreground">Drop PDFs here or click to choose</span>
+            <span className="mt-0.5 text-[12.5px]">
+              Several at once is fine: résumé, job description, slides, notes. PDF, DOCX, TXT or MD.
+            </span>
+          </button>
+
+          {docs.length || pending.length ? (
+            <ul className="mt-2 divide-y divide-border rounded-lg border border-border">
+              {docs.map((d, i) => {
+                const cut = composed.trimmed.docs[i];
+                return (
+                  <li key={d.id} className="px-3 py-2">
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13.5px] font-medium">{d.name}</p>
+                        <p className="text-[12px] text-muted-foreground">
+                          {d.pages ? `${d.pages} page${d.pages === 1 ? "" : "s"} · ` : ""}
+                          {fmtSize(d.size)} · ~{approxTokens(d.text.length).toLocaleString()} tokens
+                          {cut ? (
+                            <span className="text-warn"> · last {Math.max(1, Math.round((cut / d.text.length) * 100))}% not included</span>
+                          ) : null}
+                        </p>
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={() => setPreview(preview === d.id ? null : d.id)}>
+                        {preview === d.id ? "Hide text" : "View text"}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-8"
+                        aria-label={`Remove ${d.name}`}
+                        title={`Remove ${d.name}`}
+                        onClick={() => setDocs((ds) => ds.filter((x) => x.id !== d.id))}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                    {preview === d.id ? (
+                      <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap rounded-md bg-raised p-2.5 font-sans text-[12.5px] leading-relaxed text-muted-foreground">
+                        {d.text.length > 6000
+                          ? `${d.text.slice(0, 6000)}\n\n… (${(d.text.length - 6000).toLocaleString()} more characters)`
+                          : d.text}
+                      </pre>
+                    ) : null}
+                  </li>
+                );
+              })}
+              {pending.map((p) => (
+                <li key={p.key} className="flex items-center gap-2.5 px-3 py-2">
+                  {p.state === "reading" ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  ) : (
+                    <AlertCircle className="size-4 shrink-0 text-danger" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13.5px] font-medium">{p.name}</p>
+                    <p className={cn("text-[12px]", p.state === "error" ? "text-danger" : "text-muted-foreground")}>
+                      {p.state === "reading" ? "Reading…" : p.error}
+                    </p>
+                  </div>
+                  {p.state === "error" ? (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-8"
+                      aria-label={`Dismiss ${p.name}`}
+                      onClick={() => setPending((xs) => xs.filter((x) => x.key !== p.key))}
+                    >
+                      <X />
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        <div>
+          <label htmlFor="brief-content" className="text-[13px] font-medium">
+            Notes <span className="font-normal text-muted-foreground">(optional)</span>
+          </label>
           <Textarea
             id="brief-content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Paste a résumé, job description, agenda or notes — or add a file."
-            className="mt-1 max-h-[320px] min-h-[160px] text-[13px] leading-relaxed"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Paste anything else Claude should know: talking points, the company, who you're meeting."
+            className="mt-1 max-h-[260px] min-h-[96px] text-[13px] leading-relaxed"
           />
-          <p className="mt-1 text-[12.5px] text-muted-foreground">
-            {content.length.toLocaleString()} characters
-            {files.length ? ` · from ${files.map((f) => f.name).join(", ")}` : ""}
-          </p>
-          {error ? <p className="mt-1 text-[13px] text-danger">{error}</p> : null}
         </div>
+
+        <div className="rounded-lg bg-raised px-3 py-2 text-[12.5px] text-muted-foreground">
+          {docs.length} document{docs.length === 1 ? "" : "s"}
+          {notes.trim() ? " + notes" : ""} · ~{approxTokens(Math.min(composed.totalChars, BRIEF_MAX_CHARS)).toLocaleString()} tokens
+          sent with each answer
+          {trimmedParts ? (
+            <span className="text-warn">
+              {" "}
+              · over the ~{approxTokens(BRIEF_MAX_CHARS).toLocaleString()}-token limit, so the longest{" "}
+              {trimmedParts === 1 ? "part is" : `${trimmedParts} parts are`} shortened. Every document still gets a fair share.
+            </span>
+          ) : null}
+        </div>
+
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            disabled={!name.trim() || !content.trim()}
-            onClick={async () => {
-              await getRepo().saveBrief({
-                ...brief,
-                name: name.trim(),
-                content: content.trim(),
-                filesJson: JSON.stringify(files),
-                updatedAt: Date.now(),
-              });
-              await onSaved();
-            }}
-          >
-            Save brief
+          <Button size="sm" disabled={!name.trim() || !composed.content.trim() || reading || saving} onClick={() => void save()}>
+            {reading ? "Reading files…" : "Save brief"}
           </Button>
           <Button size="sm" variant="ghost" onClick={onCancel}>
             Cancel

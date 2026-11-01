@@ -7,6 +7,8 @@ export interface ExtractResult {
   text: string;
   name: string;
   size: number;
+  /** PDF page count. */
+  pages?: number;
 }
 
 function tidy(text: string): string {
@@ -17,7 +19,7 @@ function tidy(text: string): string {
     .trim();
 }
 
-async function extractPdf(data: ArrayBuffer): Promise<string> {
+async function extractPdf(data: ArrayBuffer): Promise<{ text: string; pages: number }> {
   const pdfjs = await import("pdfjs-dist");
   const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
@@ -40,8 +42,9 @@ async function extractPdf(data: ArrayBuffer): Promise<string> {
     if (line) lines.push(line);
     pages.push(lines.join("\n"));
   }
+  const count = doc.numPages;
   await task.destroy();
-  return pages.join("\n\n");
+  return { text: pages.join("\n\n"), pages: count };
 }
 
 async function extractDocx(data: ArrayBuffer): Promise<string> {
@@ -54,9 +57,10 @@ export async function extractBriefText(file: File): Promise<ExtractResult> {
   const name = file.name;
   const ext = name.toLowerCase().split(".").pop() ?? "";
   let text: string;
+  let pages: number | undefined;
   if (ext === "pdf" || file.type === "application/pdf") {
     try {
-      text = await extractPdf(await file.arrayBuffer());
+      ({ text, pages } = await extractPdf(await file.arrayBuffer()));
     } catch {
       throw new Error(`“${name}” couldn't be read as a PDF. It may be damaged or password-protected.`);
     }
@@ -72,6 +76,6 @@ export async function extractBriefText(file: File): Promise<ExtractResult> {
     throw new Error(`“${name}” isn't a PDF, DOCX, TXT or MD file.`);
   }
   text = tidy(text);
-  if (!text) throw new Error(`No text found in “${name}”. Scanned PDFs need OCR first.`);
-  return { text, name, size: file.size };
+  if (!text) throw new Error(`No text found in “${name}”. It may be a scanned PDF (images only), which needs OCR first.`);
+  return { text, name, size: file.size, pages };
 }

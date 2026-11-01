@@ -318,6 +318,8 @@ Search with e.g. `SELECT t.* FROM transcript_fts f JOIN transcript t ON t.rowid 
 | `notes.kind` | the mode (`meeting`, `lecture`, ...) for rolling notes |
 | `sessions.summary_json` | the end-of-session summary |
 | `briefs.mode` | marks a brief as the default for that mode, so a brief can be the default for one mode at a time |
+| `briefs.files_json` | `{"v":2,"notes":string,"docs":[{id,name,size,pages?,text}]}`: each document's full extracted text plus the pasted notes. Legacy rows hold `[{name,size,chars}]`. |
+| `briefs.content` | the composed text actually sent: notes, then `=== file.pdf (N pages) ===` sections, fitted fairly to 200,000 characters (`core/briefs/sources.ts`) |
 
 ---
 
