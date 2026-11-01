@@ -85,6 +85,13 @@ async function main() {
   await run('dashboard_bad_route', () => invoke('dashboard_open', { route: 'https://example.com' }));
   await run('log_write', () => invoke('log_write', { level: 'warn', message: 'smoke warn with sk-ant-should-be-redacted' }));
   await report('SMOKE_DONE', {});
+  // click-through on/off (the harness checks the native style + display affinity in between)
+  await sleep(8000);
+  await run('click_through_on', async () => (await invoke('window_set_click_through', { enabled: true })).clickThrough);
+  await report('CLICKTHROUGH_ON', {});
+  await sleep(2500);
+  await run('click_through_off', async () => (await invoke('window_set_click_through', { enabled: false })).clickThrough);
+  await report('CLICKTHROUGH_OFF', {});
 }
 
 if (label === 'main') main();

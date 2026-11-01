@@ -567,7 +567,8 @@ pub async fn window_set_size(
 #[tauri::command]
 pub async fn window_set_click_through(app: AppHandle, enabled: bool) -> AppResult<WindowState> {
     crate::settings::update_with(&app, |s| s.overlay.click_through = enabled)?;
-    changed(&app)
+    // settings side effects already broadcast window://state and refresh the tray
+    current_state(&app)
 }
 
 #[tauri::command]
@@ -576,13 +577,15 @@ pub async fn window_set_content_protection(
     enabled: bool,
 ) -> AppResult<WindowState> {
     crate::settings::update_with(&app, |s| s.overlay.content_protection = enabled)?;
-    changed(&app)
+    // settings side effects already broadcast window://state and refresh the tray
+    current_state(&app)
 }
 
 #[tauri::command]
 pub async fn window_set_always_on_top(app: AppHandle, enabled: bool) -> AppResult<WindowState> {
     crate::settings::update_with(&app, |s| s.overlay.always_on_top = enabled)?;
-    changed(&app)
+    // settings side effects already broadcast window://state and refresh the tray
+    current_state(&app)
 }
 
 #[tauri::command]
