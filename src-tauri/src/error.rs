@@ -75,7 +75,10 @@ mod tests {
     fn serializes_camel_case_without_empty_detail() {
         let e = AppError::new("key_invalid", "Key rejected");
         let v = serde_json::to_value(&e).unwrap();
-        assert_eq!(v, serde_json::json!({"code": "key_invalid", "message": "Key rejected"}));
+        assert_eq!(
+            v,
+            serde_json::json!({"code": "key_invalid", "message": "Key rejected"})
+        );
         let e = e.with_detail("401");
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["detail"], "401");
