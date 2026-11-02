@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   ShieldCheck,
   ShieldOff,
+  Stethoscope,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -22,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MODE_META } from "@/core/defaults";
-import { loadBriefs, toggleListening, useLive } from "@/core/live/session";
+import { loadBriefs, runQuickScanNow, toggleListening, useLive } from "@/core/live/session";
 import { native } from "@/core/native";
 import { useSettings } from "@/core/settings";
 import { MODES, type Mode } from "@/core/types";
@@ -46,6 +47,7 @@ export function TopBar() {
   const keys = useSettings((s) => s.settings.shortcuts);
   const win = useOverlay((s) => s.win);
   const protectedFromShare = win?.contentProtected ?? true;
+  const scanning = useLive((s) => s.scan.running);
 
   return (
     <header
@@ -55,6 +57,14 @@ export function TopBar() {
       <ModeMenu mode={mode} />
       <ListenButton />
       <div className="min-w-2 flex-1 self-stretch" aria-hidden />
+      <IconButton
+        label="Quick scan & fix: checks keys, devices and audio, and restarts the audio capture"
+        active={scanning}
+        disabled={scanning}
+        onClick={() => void runQuickScanNow()}
+      >
+        {scanning ? <Loader2 className="animate-spin" /> : <Stethoscope />}
+      </IconButton>
       <IconButton
         label={
           protectedFromShare

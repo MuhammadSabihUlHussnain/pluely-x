@@ -10,6 +10,8 @@ import { useSettings, useShortcutHealth } from "@/core/settings";
 import { cn } from "@/lib/utils";
 import { ModeIcon } from "../shared/modes";
 import { AnswerStack } from "./AnswerStack";
+import { AudioCheckBanner } from "./AudioCheckBanner";
+import { ScanPanel } from "./ScanPanel";
 import { AskBox } from "./AskBox";
 import { expand, initOverlay, openDashboard } from "./controller";
 import { useOverlay } from "./store";
@@ -52,6 +54,8 @@ function Panel() {
         </div>
       ) : null}
       <LiveErrorBanner />
+      <ScanPanel />
+      <AudioCheckBanner />
       <ShortcutConflictBanner />
       <TranscriptStrip />
       <AnswerStack />

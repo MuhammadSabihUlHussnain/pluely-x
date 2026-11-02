@@ -24,7 +24,15 @@ import type {
   TranscriptEvent,
 } from "../types";
 import { newId, newRequestId } from "../util";
+import {
+  AUDIO_CHECK_IDLE,
+  playCheckTone,
+  runAudioCheck,
+  ThemSilenceWatch,
+  type AudioCheck,
+} from "./audioCheck";
 import { cardSink, useCards, type Card } from "./cards";
+import { runQuickScan, SCAN_IDLE, type ScanState } from "./quickScan";
 import { AnswerPipeline } from "./pipeline";
 import {
   applyPatch,
@@ -59,6 +67,10 @@ export interface LiveState {
   startedAtMs: number | null;
   sources: Record<Source, SourceInfo>;
   levels: { me: Level | null; them: Level | null };
+  /** Whether computer audio (the interviewer) actually reaches the "them" capture. */
+  audioCheck: AudioCheck;
+  /** "Quick scan & fix" progress and results. */
+  scan: ScanState;
   transcript: TranscriptState;
   error: LiveError | null;
   notes: RollingNotes | null;
@@ -79,6 +91,8 @@ export const useLive = create<LiveState>(() => ({
   startedAtMs: null,
   sources: idleSources(),
   levels: { me: null, them: null },
+  audioCheck: AUDIO_CHECK_IDLE,
+  scan: SCAN_IDLE,
   transcript: emptyTranscript(),
   error: null,
   notes: null,
@@ -259,6 +273,7 @@ function handleEvent(ev: SessionEvent): void {
       return;
     }
     case "device":
+      deviceOpens[ev.source]++;
       set({
         sources: {
           ...st.sources,
@@ -267,6 +282,7 @@ function handleEvent(ev: SessionEvent): void {
       });
       return;
     case "transcript": {
+      watchTranscript(ev);
       set({ transcript: trimTranscript(applyTranscript(st.transcript, ev), MAX_SEGMENTS) });
       if (ev.isFinal && !ev.echo && st.conversationId) persistFinal(st.conversationId, ev);
       return;
@@ -316,6 +332,136 @@ function handleEvent(ev: SessionEvent): void {
 }
 
 // ---------------------------------------------------------------------------
+// Audio check: is the interviewer's side (computer audio) actually being heard?
+
+let checkRun = 0;
+let silenceWatch: ThemSilenceWatch | null = null;
+
+function logAudio(level: "info" | "warn", message: string): void {
+  void native.logWrite(level, `health: ${message}`).catch(() => {});
+}
+
+/** Runs the check (re-runnable). Supersedes any check still in flight. */
+export async function runAudioCheckNow(): Promise<void> {
+  const run = ++checkRun;
+  set({ audioCheck: { phase: "checking" } });
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const verdict = await runAudioCheck({
+    themLevel: () => get().levels.them,
+    themCapturing: () => {
+      const them = get().sources.them;
+      return them.state !== "error" && (get().levels.them !== null || !!them.device);
+    },
+    playTone: playCheckTone,
+    sleep,
+    now: () => Date.now(),
+    cancelled: () => run !== checkRun || get().status === "idle" || get().status === "stopping",
+  });
+  if (run !== checkRun || !verdict) return;
+  set({ audioCheck: verdict });
+  if (verdict.phase === "problem") logAudio("warn", `problem=${verdict.kind}`);
+  else if (verdict.phase === "ok") logAudio("info", `ok via ${verdict.how}`);
+}
+
+export function dismissAudioCheck(): void {
+  set({ audioCheck: AUDIO_CHECK_IDLE });
+}
+
+function cancelAudioCheck(): void {
+  checkRun++;
+  silenceWatch = null;
+  set({ audioCheck: AUDIO_CHECK_IDLE });
+}
+
+/** Feeds transcript events to the silence watch (interviewer spoke / you kept talking alone). */
+function watchTranscript(ev: TranscriptEvent): void {
+  if (!silenceWatch) return;
+  if (ev.source === "them") {
+    if (ev.text.trim()) silenceWatch.onThemSpeech();
+    return;
+  }
+  if (!ev.isFinal || ev.echo) return;
+  if (silenceWatch.onMeFinal(ev.text, Date.now()) && get().audioCheck.phase !== "problem") {
+    set({ audioCheck: { phase: "problem", kind: "mic_only" } });
+    logAudio("warn", "problem=mic_only (mic heard talking, no interviewer speech)");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Quick scan & fix
+
+/** Capture (re)opens per source; a restart waits for this to tick. */
+const deviceOpens: Record<Source, number> = { me: 0, them: 0 };
+const STUCK_ANSWER_MS = 60_000;
+
+async function restartSource(source: Source): Promise<boolean> {
+  const before = deviceOpens[source];
+  await native.sessionSetSource({ source, enabled: false });
+  await new Promise((r) => setTimeout(r, 300));
+  await native.sessionSetSource({ source, enabled: true });
+  const end = Date.now() + 6000;
+  while (Date.now() < end) {
+    if (deviceOpens[source] > before) return true;
+    if (get().status !== "live") return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+function clearStuckAnswers(): number {
+  const now = Date.now();
+  let n = 0;
+  for (const c of useCards.getState().cards) {
+    const waiting = c.status === "pending" || c.status === "thinking" || c.status === "streaming";
+    if (!waiting || c.content.trim() || now - c.createdAt < STUCK_ANSWER_MS) continue;
+    if (pipeline.isBusy(c.id)) pipeline.stop(c.id);
+    else cardSink.remove(c.id);
+    n++;
+  }
+  return n;
+}
+
+export async function runQuickScanNow(): Promise<void> {
+  if (get().scan.running) return;
+  set({ scan: { running: true, steps: [] } });
+  logAudio("info", "quick scan started");
+  const steps = await runQuickScan({
+    keysStatus: async () => {
+      const k = await native.keysStatus();
+      return { anthropic: k.anthropic.present, deepgram: k.deepgram.present };
+    },
+    testKey: async (p) => {
+      const r = await native.keysTest(p);
+      return { ok: r.ok, message: r.message };
+    },
+    devices: async () => {
+      const d = await native.audioListDevices();
+      return { inputs: d.inputs.length, outputs: d.outputs.length };
+    },
+    listening: () => get().status === "live",
+    modeAutoAnswers: () => {
+      const meta = MODE_META[mode()];
+      return { label: meta.label, autoAnswers: meta.autoAnswers };
+    },
+    restartSource,
+    clearStuckAnswers,
+    runAudioCheck: async () => {
+      await runAudioCheckNow();
+      return get().audioCheck;
+    },
+    shortcutFailures: async () => (await native.shortcutsStatus()).failures.length,
+    onUpdate: (steps) => set({ scan: { running: true, steps } }),
+  });
+  set({ scan: { running: false, steps, finishedAt: Date.now() } });
+  const bad = steps.filter((s) => s.status === "fail" || s.status === "warn").map((s) => `${s.id}=${s.status}`);
+  logAudio(bad.length ? "warn" : "info", `quick scan done ${bad.length ? bad.join(" ") : "all ok"}`);
+}
+
+export function closeQuickScan(): void {
+  if (!get().scan.running) set({ scan: SCAN_IDLE });
+}
+
+// ---------------------------------------------------------------------------
 // Listening
 
 export async function buildSessionOptions(): Promise<SessionOptions> {
@@ -346,6 +492,7 @@ export async function startListening(): Promise<void> {
   set({
     status: "starting",
     error: null,
+    audioCheck: AUDIO_CHECK_IDLE,
     transcript: emptyTranscript(),
     notes: null,
     notesUpdatedAt: null,
@@ -368,6 +515,9 @@ export async function startListening(): Promise<void> {
       .catch(() => {});
     notesMark = { tMs: -1, at: Date.now() };
     startNotesTimer();
+    // Every time listening starts: confirm the interviewer's audio reaches us before the meeting.
+    silenceWatch = new ThemSilenceWatch(Date.now());
+    void runAudioCheckNow();
   } catch (e) {
     const err = e as { code?: string; message?: string };
     const d = describeSessionError(err.code ?? "unknown", err.message ?? "");
@@ -383,6 +533,7 @@ export async function stopListening(opts: { summarize?: boolean } = { summarize:
   const st = get();
   if (st.status !== "live" && st.status !== "starting") return;
   set({ status: "stopping" });
+  cancelAudioCheck();
   stopNotesTimer();
   try {
     await native.sessionStop(); // can take ~4 s while Deepgram flushes the last words
@@ -395,6 +546,7 @@ export async function stopListening(opts: { summarize?: boolean } = { summarize:
 /** Marks the session ended, persists ended_at and writes the summary. */
 async function finishSession(opts: { summarize?: boolean }): Promise<void> {
   stopNotesTimer();
+  cancelAudioCheck();
   const sessionId = get().conversationId;
   set({ status: "idle", sources: idleSources(), levels: { me: null, them: null } });
   if (sessionId) {
