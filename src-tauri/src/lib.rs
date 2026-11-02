@@ -74,6 +74,9 @@ pub fn open_logs<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
 fn setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
     let log_dir = app.path().app_log_dir()?;
     app.manage(logging::init(&log_dir));
+    if let Some(note) = db::REPAIR_NOTE.get() {
+        tracing::warn!("{note}");
+    }
 
     let config_dir = app.path().app_config_dir()?;
     app.manage(SettingsState::load(config_dir.join("settings.json")));
@@ -98,6 +101,8 @@ pub fn run() {
             window::on_second_instance(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        // must come before the SQL plugin, which verifies migration checksums in its setup
+        .plugin(db::repair_plugin())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations(db::DB_URL, db::migrations())

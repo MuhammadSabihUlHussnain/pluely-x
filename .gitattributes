@@ -1,0 +1,2 @@
+# Migrations are checksummed byte-for-byte by sqlx; keep their line endings identical on every checkout.
+*.sql text eol=lf
