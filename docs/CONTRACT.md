@@ -122,7 +122,7 @@ type SessionEvent =
  | { type: "transcriptPatch"; segId: string; echo: boolean }
  | { type: "speechStarted"; source: Source; tMs: number }
  | { type: "utteranceEnd"; source: Source; lastWordEndMs: number }
- | { type: "turn"; source: Source; turnId: string; text: string; t0Ms: number; t1Ms: number; reason: "speechFinal" | "utteranceEnd" | "finalize" | "stop"; question: boolean }
+ | { type: "turn"; source: Source; turnId: string /* "them-t1-<session tag>": unique across sessions */; text: string; t0Ms: number; t1Ms: number; reason: "speechFinal" | "utteranceEnd" | "finalize" | "stop"; question: boolean }
  | { type: "levels"; tMs: number; me: Level | null; them: Level | null }          // 10 Hz
  | { type: "error"; source?: Source; code: string; message: string; fatal: boolean; retryInMs?: number }
  | { type: "stats"; source: Source; sentMs: number; droppedMs: number; reconnects: number; discontinuities: number }   // every 5 s
@@ -214,13 +214,13 @@ The store keeps the last 10 shots in memory by id. `screenshot_save` ids and ses
 
 ```ts
 interface AppSettings {
-  version: 1;                                   // owned by Rust; patches can't change it
+  version: number;                              // owned by Rust (currently 2); patches can't change it
   onboarded: boolean;                           // default false
   mode: Mode;                                   // last used mode; default "ask"
   overlay: { width: number /*440, 200–8192*/; height: number /*560, 40–8192*/; opacity: number /*1, 0.3–1*/; clickThrough: boolean /*false*/;
              contentProtection: boolean /*default true*/; alwaysOnTop: boolean /*true*/; launchAtStartup: boolean /*false*/ };
   audio: { micDeviceId: string | null /*null*/; outputDeviceId: string | null /*null*/; aec: "auto" | "on" | "off" /*"auto"*/ };
-  stt: { language: string /*"en"*/; endpointingMs: number /*300, 10–5000*/; utteranceEndMs: number /*1000, 1000–5000*/; diarizeThem: boolean /*false*/ };
+  stt: { language: string /*"en"*/; endpointingMs: number /*700, 10–5000*/; utteranceEndMs: number /*1000, 1000–5000*/; diarizeThem: boolean /*false*/ };
   ai: { model: string /*"claude-opus-5-5"*/; liveEffort: "low" | "medium" | "high" /*"low"*/; deepEffort: "low" | "medium" | "high" /*"medium"*/; maxTokens: number /*16000, 256–128000*/ };
   shortcuts: Record<ShortcutAction, { key: string; enabled: boolean }>;   // defaults in §7
 }

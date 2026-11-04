@@ -23,6 +23,7 @@ import {
   BASE_SYSTEM,
   BRIEF_PREAMBLE,
   FOLLOWUP_INSTRUCTION,
+  HEARD_ANSWER_INSTRUCTION,
   NOTES_INSTRUCTION,
   SCREEN_INSTRUCTION,
   SUMMARY_INSTRUCTION,
@@ -188,6 +189,18 @@ export function buildAutoAnswer(
     {
       type: "text",
       text: `<latest_them_turn>\n${latestThemTurn.trim()}\n</latest_them_turn>\n${AUTO_ANSWER_INSTRUCTION}`,
+    },
+  ];
+  return request(baseBody(ctx, ctx.ai.liveEffort, [userMessage(blocks)]));
+}
+
+/** "Answer it" on a heard or skipped Them turn: like an auto-answer, but always answers. */
+export function buildHeardAnswer(ctx: PromptContext, transcript: ContextLine[], themTurn: string): LlmRequest {
+  const blocks: BetaContentBlockParam[] = [
+    ...transcriptBlock(transcript, BUDGET.autoTranscript),
+    {
+      type: "text",
+      text: `<latest_them_turn>\n${themTurn.trim()}\n</latest_them_turn>\n${HEARD_ANSWER_INSTRUCTION}`,
     },
   ];
   return request(baseBody(ctx, ctx.ai.liveEffort, [userMessage(blocks)]));

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "../defaults";
 import { formatTranscript, OMITTED_MARKER, type ContextLine } from "./context";
-import { AUTO_ANSWER_INSTRUCTION, DEFAULT_MODE_PROMPTS, NULL_SENTINEL } from "./prompts";
+import { AUTO_ANSWER_INSTRUCTION, DEFAULT_MODE_PROMPTS, HEARD_ANSWER_INSTRUCTION, NULL_SENTINEL } from "./prompts";
 import {
   buildAskNow,
   buildAutoAnswer,
   buildFollowup,
+  buildHeardAnswer,
   buildNotes,
   buildSummary,
   buildSystem,
@@ -145,6 +146,14 @@ describe("request builders", () => {
     // ∅ instruction only on auto-answers
     expect(textOfLastUser(buildAskNow(ctx(), lines))).not.toContain(NULL_SENTINEL);
     expect(textOfLastUser(buildTypedAsk(ctx(), { question: "hi" }))).not.toContain(NULL_SENTINEL);
+  });
+
+  it("Answer it on a skipped line overrides the mode prompt's skip rule", () => {
+    const user = textOfLastUser(buildHeardAnswer(ctx(), lines, "Can you hear me okay?"));
+    expect(user).toContain("<latest_them_turn>\nCan you hear me okay?\n</latest_them_turn>");
+    expect(user).toContain(HEARD_ANSWER_INSTRUCTION);
+    expect(HEARD_ANSWER_INSTRUCTION).toContain(`Do not output ${NULL_SENTINEL}`);
+    expect(user).not.toContain(AUTO_ANSWER_INSTRUCTION);
   });
 
   it("sends history oldest first and ends on a user turn", () => {

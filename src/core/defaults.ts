@@ -18,7 +18,7 @@ export const DEFAULT_SHORTCUTS: AppSettings["shortcuts"] = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  version: 1,
+  version: 2,
   onboarded: false,
   mode: "ask",
   overlay: {
@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     launchAtStartup: false,
   },
   audio: { micDeviceId: null, outputDeviceId: null, aec: "auto" },
-  stt: { language: "en", endpointingMs: 300, utteranceEndMs: 1000, diarizeThem: false },
+  stt: { language: "en", endpointingMs: 700, utteranceEndMs: 1000, diarizeThem: false },
   ai: { model: DEFAULT_MODEL, liveEffort: "low", deepEffort: "medium", maxTokens: 16000 },
   shortcuts: DEFAULT_SHORTCUTS,
 };

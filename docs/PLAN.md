@@ -127,7 +127,7 @@ llm/anthropic.rs   SSE proxy, so the Anthropic key never enters the webview
 - **Format:** request 16 kHz mono f32 with autoconvert, and a 200 ms buffer.
 - **Drain loop:** drain *all* packets per event (`get_next_packet_size`), honour the SILENT flag, and keep QPC timestamps on a shared session clock.
 - **Silence:** a 100 ms wait timeout that never exits on silence. 1.5 s of synthetic tail-fill lets Deepgram endpoint after the audio stops.
-- **Frames:** 50 ms frames go over `try_send` (`mpsc(64)`) to the Deepgram task. Reconnects get a 10 s backlog.
+- **Frames:** 50 ms frames go over `try_send` (`mpsc(64)`) to the Deepgram task. Reconnects get a 90 s backlog.
 - **Recovery:** the device follows the default with a 400 ms debounce, and restarts with backoff when the device is lost.
 - **Errors:** mic privacy denial is turned into a clear error with a settings link.
 - **Workarounds for wasapi bugs:** use `read_from_device`, not the `_to_deque` variant; pass `None` for the AEC endpoint; close event handles.

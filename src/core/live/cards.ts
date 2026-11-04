@@ -6,7 +6,10 @@ import type { FollowupChip } from "../ai/prompts";
 import type { SessionSummaryJson } from "../ai/schemas";
 import type { Mode } from "../types";
 
-/** "heard": a question from the other side in a mode without auto-answers, shown with an Answer button. */
+/**
+ * "heard": a question from the other side that wasn't answered on its own (a mode without
+ * auto-answers, or Claude said it wasn't a question for the user), shown with an Answer button.
+ */
 export type CardKind = "auto" | "ask_now" | "typed" | "screen" | "followup" | "summary" | "heard";
 export type CardStatus = "pending" | "thinking" | "streaming" | "done" | "stopped" | "error";
 
@@ -33,6 +36,11 @@ export interface Card {
   error?: CardError;
   /** Auto-answers stay provisional until the stream proves it isn't ∅. */
   provisional?: boolean;
+  /**
+   * Why a "heard" card isn't answered: the mode doesn't auto-answer, or Claude judged it
+   * not a question for the user (∅). Either way it offers an Answer button.
+   */
+  heardReason?: "mode" | "not_question";
   createdAt: number;
   summary?: SessionSummaryJson;
   persisted?: boolean;

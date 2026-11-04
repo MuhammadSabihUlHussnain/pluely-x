@@ -516,3 +516,95 @@ async fn quiet_finalize_after_speech() {
     assert!(texts[0].0 >= 10, "sent after the quiet period, not during speech: {texts:?}");
     h.control.send(DgControl::Stop).unwrap();
 }
+
+#[test]
+fn backlog_holds_ninety_seconds_and_drops_the_oldest_beyond() {
+    assert_eq!(DgTimings::default().backlog, Duration::from_secs(90));
+    let stats = SourceStats::default();
+    let mut b = Backlog::new(DgTimings::default().backlog);
+    // 100 s of 50 ms frames while the network is down.
+    for i in 0..2000 {
+        b.push(frame(i), &stats);
+    }
+    assert_eq!(b.ms, 90_000, "keeps exactly the newest 90 s");
+    assert_eq!(SourceStats::get(&stats.dropped_ms), 10_000);
+    // On reconnect the live socket gets the newest 10 s; the other 80 s go to catch-up.
+    let older = b.split_older(DgTimings::default().live_replay);
+    assert_eq!(older.len(), 1600);
+    assert_eq!(seq_of(&older[0].pcm), 200, "oldest kept frame is from t = 10 s");
+    assert_eq!(b.ms, 10_000);
+    assert_eq!(seq_of(&b.pop().unwrap().pcm), 1800);
+}
+
+#[test]
+fn quiet_finalize_never_fires_before_the_endpoint() {
+    let t = DgTimings::default();
+    assert_eq!(t.with_endpointing(300).quiet_finalize, Some(Duration::from_millis(600)));
+    assert_eq!(t.with_endpointing(700).quiet_finalize, Some(Duration::from_millis(850)));
+    assert_eq!(t.with_endpointing(2000).quiet_finalize, Some(Duration::from_millis(2150)));
+    let off = DgTimings { quiet_finalize: None, ..t };
+    assert_eq!(off.with_endpointing(700).quiet_finalize, None);
+}
+
+#[tokio::test]
+async fn long_outage_replays_the_newest_audio_live_and_catches_up_the_rest() {
+    // The reconnect handshake takes 1.2 s, so ~1.2 s of audio is buffered; the live socket
+    // replays only the newest 0.5 s and the older part goes to a catch-up socket.
+    let mut dg = MockDeepgram::start(vec![Behavior::Accept, Behavior::Delay(Duration::from_millis(1200))]).await;
+    let timings = DgTimings { live_replay: Duration::from_millis(500), ..DgTimings::default() };
+    let mut h = start_client(&dg.base_url(), timings);
+    let mut s1 = dg.accept(Duration::from_secs(5)).await;
+    h.wait_for("live 1", Duration::from_secs(5), |e| matches!(e, DgEvent::Live { conn: 1 })).await;
+    let feed = feeder(h.frames.clone(), 0, None);
+    let mut last1 = 0;
+    for _ in 0..6 {
+        if let Some(Got::Binary(b)) = s1.next_timeout(Duration::from_secs(3)).await {
+            last1 = seq_of(&b);
+        }
+    }
+    drop(s1);
+
+    let mut live = dg.accept(Duration::from_secs(5)).await;
+    h.wait_for("live 2", Duration::from_secs(5), |e| matches!(e, DgEvent::Live { conn: 2 })).await;
+    let mut catch = dg.accept(Duration::from_secs(5)).await;
+    assert!(dg.request(2).uri.contains("tag=pluelyx-them"), "same listen parameters");
+
+    // Catch-up: the older frames, contiguous, then CloseStream.
+    let mut older = Vec::new();
+    loop {
+        match catch.next_timeout(Duration::from_secs(3)).await {
+            Some(Got::Binary(b)) => older.push(seq_of(&b)),
+            Some(Got::Text(t)) => {
+                assert!(t.contains("CloseStream"), "{t}");
+                break;
+            }
+            other => panic!("catch-up socket: unexpected {other:?}"),
+        }
+    }
+    // Live: the newest 0.5 s first, then real-time frames, picking up right after catch-up.
+    let mut newer = Vec::new();
+    while newer.len() < 15 {
+        if let Some(Got::Binary(b)) = live.next_timeout(Duration::from_secs(3)).await {
+            newer.push(seq_of(&b));
+        }
+    }
+    feed.abort();
+    assert!(older.len() >= 8, "older audio went to catch-up: {older:?}");
+    assert_eq!(older[0], last1 + 1, "nothing lost between the dropped socket and catch-up");
+    assert!(older.windows(2).all(|w| w[1] == w[0] + 1), "contiguous: {older:?}");
+    assert_eq!(newer[0], older.last().unwrap() + 1, "live resumes right after catch-up: {older:?} {newer:?}");
+    assert!(newer.windows(2).all(|w| w[1] == w[0] + 1), "contiguous: {newer:?}");
+    assert_eq!(SourceStats::get(&h.stats.dropped_ms), 0);
+
+    // Catch-up finals come back as CatchUp events on the session clock, with their own ids.
+    catch.send_json(mock::results(0.0, 0.3, "what happened during the outage", true, true)).await;
+    catch.send_json(mock::results(0.3, 0.1, "", true, false)).await; // empty finals are dropped
+    let ev = h.wait_for("catch-up final", Duration::from_secs(3), |e| matches!(e, DgEvent::CatchUp(_))).await;
+    let DgEvent::CatchUp(seg) = ev else { unreachable!() };
+    assert_eq!(seg.seg_id, format!("them-{}-0", CATCH_UP_CONN_BASE + 2));
+    assert_eq!(seg.text, "what happened during the outage");
+    assert_eq!(seg.t0_ms, older[0] as i64 * 50);
+    assert!(!h.seen.iter().any(|e| matches!(e, DgEvent::Transcript(_))), "catch-up never feeds the live transcript path");
+    drop(catch);
+    let _ = h.control.send(DgControl::Stop);
+}

@@ -8,6 +8,7 @@ function deps(over: Partial<ScanDeps> = {}): ScanDeps & { restarts: string[]; up
     keysStatus: async () => ({ anthropic: true, deepgram: true }),
     testKey: async () => ({ ok: true }),
     devices: async () => ({ inputs: 1, outputs: 1 }),
+    callDevice: async () => null,
     listening: () => true,
     modeAutoAnswers: () => ({ label: "Interview", autoAnswers: true }),
     restartSource: async (s: "me" | "them") => {
@@ -52,6 +53,19 @@ describe("runQuickScan", () => {
     expect(byId(steps, "keys")).toMatchObject({ status: "fail", action: "settings" });
     expect(byId(steps, "claude").status).toBe("skipped");
     expect(tested).toBe(1); // only Deepgram
+  });
+
+  it("warns, with a one-click switch, when calls play on a different output than the captured one", async () => {
+    const devices = { callId: "out-jabra", call: "Headphones (Jabra)", capture: "Speakers (Realtek)" };
+    const steps = await runQuickScan(deps({ callDevice: async () => devices }));
+    expect(byId(steps, "route")).toMatchObject({ status: "warn", action: "use_call_device", devices });
+    expect(byId(steps, "route").detail).toContain("Headphones (Jabra)");
+    expect(scanVerdict(steps)).toBe("warn");
+    // The audio check then says "other device", but the beep did arrive: no false failure.
+    const again = await runQuickScan(
+      deps({ callDevice: async () => devices, runAudioCheck: async () => ({ phase: "problem", kind: "other_device", devices }) }),
+    );
+    expect(byId(again, "audio").status).toBe("ok");
   });
 
   it("flags a mode without auto-answers", async () => {

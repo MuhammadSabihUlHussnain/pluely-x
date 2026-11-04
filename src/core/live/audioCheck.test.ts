@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Level } from "../types";
-import { hasSignal, runAudioCheck, ThemSilenceWatch, type CheckDeps } from "./audioCheck";
+import { callDeviceMismatch, describeProblem, hasSignal, runAudioCheck, ThemSilenceWatch, type CheckDeps } from "./audioCheck";
 
 const LOUD: Level = { rmsDb: -30, peakDb: -20 };
 const QUIET: Level = { rmsDb: -90, peakDb: -90 };
@@ -106,5 +106,34 @@ describe("ThemSilenceWatch", () => {
     const w = new ThemSilenceWatch(0);
     expect(w.onMeFinal(words(60), 20_000)).toBe(false);
     expect(w.onMeFinal(words(1), 61_000)).toBe(true); // enough words, now past a minute
+  });
+});
+
+describe("callDeviceMismatch", () => {
+  const speakers = { id: "out-realtek", name: "Speakers (Realtek)", isDefault: true, isDefaultComms: false };
+  const headset = { id: "out-jabra", name: "Headphones (Jabra)", isDefault: false, isDefaultComms: true };
+
+  it("flags a communications device that isn't the one being captured", () => {
+    expect(callDeviceMismatch([speakers, headset], "out-realtek")).toEqual({
+      callId: "out-jabra",
+      call: "Headphones (Jabra)",
+      capture: "Speakers (Realtek)",
+    });
+    // No device known yet: the default output is what gets captured.
+    expect(callDeviceMismatch([speakers, headset], null)?.capture).toBe("Speakers (Realtek)");
+  });
+
+  it("is quiet when the call device is the captured one", () => {
+    expect(callDeviceMismatch([speakers, headset], "out-jabra")).toBeNull();
+    const both = { ...speakers, isDefaultComms: true };
+    expect(callDeviceMismatch([both, { ...headset, isDefaultComms: false }], null)).toBeNull();
+    expect(callDeviceMismatch([speakers], null)).toBeNull(); // no comms default reported
+  });
+
+  it("names both devices in the warnings", () => {
+    const d = callDeviceMismatch([speakers, headset], null)!;
+    expect(describeProblem("other_device", d).detail).toContain('"Headphones (Jabra)"');
+    expect(describeProblem("mic_only", d).detail).toContain('"Headphones (Jabra)"');
+    expect(describeProblem("mic_only").detail).not.toContain("Jabra");
   });
 });

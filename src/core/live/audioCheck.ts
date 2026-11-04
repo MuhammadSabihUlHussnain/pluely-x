@@ -12,13 +12,28 @@ export const SIGNAL_PEAK_DB = -55;
 
 export const hasSignal = (l: Level | null | undefined): boolean => !!l && l.peakDb > SIGNAL_PEAK_DB;
 
-export type AudioProblem = "not_capturing" | "silent" | "unverified" | "mic_only";
+export type AudioProblem = "not_capturing" | "silent" | "unverified" | "mic_only" | "other_device";
+
+/** The call app's likely output device versus the one Pluely X listens to (they differ). */
+export interface CallDevices {
+  /** Windows' default communications output: where Teams, Zoom & co. usually play calls. */
+  callId: string;
+  call: string;
+  /** The output Pluely X captures. */
+  capture: string;
+}
 
 export type AudioCheck =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "ok"; how: "call_audio" | "test_tone" }
-  | { phase: "problem"; kind: AudioProblem };
+  | {
+      phase: "problem";
+      kind: AudioProblem;
+      devices?: CallDevices;
+      /** "unverified" because Pluely X listens to this non-default output, which the beep can't reach. */
+      capture?: string;
+    };
 
 export const AUDIO_CHECK_IDLE: AudioCheck = { phase: "idle" };
 
@@ -116,6 +131,27 @@ export async function playCheckTone(): Promise<boolean> {
   }
 }
 
+export interface OutputDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  isDefaultComms: boolean;
+}
+
+/**
+ * Call apps (Teams, Zoom, Webex, Meet in a browser set to "communications") usually play
+ * through Windows' default *communications* output, while Pluely X listens to the default
+ * output (or the one picked in Settings). When those are different devices the interviewer
+ * plays where Pluely X isn't listening, and the test beep (played on the captured device)
+ * can't catch it. Returns both names when they differ, else null.
+ */
+export function callDeviceMismatch(outputs: OutputDevice[], capturedId: string | null | undefined): CallDevices | null {
+  const comms = outputs.find((d) => d.isDefaultComms);
+  const captured = (capturedId ? outputs.find((d) => d.id === capturedId) : undefined) ?? outputs.find((d) => d.isDefault);
+  if (!comms || !captured || comms.id === captured.id) return null;
+  return { callId: comms.id, call: comms.name, capture: captured.name };
+}
+
 /**
  * Watches for "your mic is hearing talking but no interviewer speech has arrived". That is what
  * a silent output capture looks like from inside a session, and it can start mid-session
@@ -146,7 +182,11 @@ export class ThemSilenceWatch {
   }
 }
 
-export function describeProblem(kind: AudioProblem): { title: string; detail: string } {
+export function describeProblem(
+  kind: AudioProblem,
+  devices?: CallDevices,
+  capture?: string,
+): { title: string; detail: string } {
   switch (kind) {
     case "not_capturing":
       return {
@@ -162,14 +202,23 @@ export function describeProblem(kind: AudioProblem): { title: string; detail: st
     case "unverified":
       return {
         title: "Couldn't verify computer audio",
-        detail:
-          "No sound is playing and the test beep was blocked. Play any sound, or have them speak, and watch the Them meter move.",
+        detail: capture
+          ? `Pluely X listens to "${capture}", which isn't the default output, so the test beep can't reach it. Play any sound there, or have them speak, and watch the Them meter move.`
+          : "No sound is playing and the test beep was blocked. Play any sound, or have them speak, and watch the Them meter move.",
       };
     case "mic_only":
       return {
         title: "Not hearing the interviewer",
-        detail:
-          "Your mic is picking up talking, but nothing is coming through computer audio, so answers won't appear. If they're on this computer, check the output device and volume.",
+        detail: devices
+          ? `Your mic is picking up talking, but nothing is coming through "${devices.capture}". The call may be playing on "${devices.call}" instead.`
+          : "Your mic is picking up talking, but nothing is coming through computer audio, so answers won't appear. If they're on this computer, check the output device and volume.",
+      };
+    case "other_device":
+      return {
+        title: "The call may play on another device",
+        detail: devices
+          ? `Calls usually play on "${devices.call}" (Windows' communications device), but Pluely X listens to "${devices.capture}".`
+          : "Calls may play on a different output device than the one Pluely X listens to.",
       };
   }
 }

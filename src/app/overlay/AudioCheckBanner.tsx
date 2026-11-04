@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 import { useEffect } from "react";
 import { IconButton } from "@/components/common";
 import { describeProblem } from "@/core/live/audioCheck";
-import { dismissAudioCheck, runAudioCheckNow, useLive } from "@/core/live/session";
+import { dismissAudioCheck, listenOnCallDevice, runAudioCheckNow, useLive } from "@/core/live/session";
 
 /** Result of the check that runs every time listening starts, plus the mid-session warning. */
 export function AudioCheckBanner() {
@@ -38,7 +38,29 @@ export function AudioCheckBanner() {
     );
   }
 
-  const { title, detail } = describeProblem(check.kind);
+  const { title, detail } = describeProblem(check.kind, check.devices, check.capture);
+  if (check.kind === "other_device" && check.devices) {
+    const devices = check.devices;
+    return (
+      <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-white/[0.07] bg-warn/[0.12] px-3 py-2 text-[13px]">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-foreground">{title}</p>
+          <p className="text-[12.5px] text-muted-foreground">{detail}</p>
+          <button
+            type="button"
+            onClick={() => void listenOnCallDevice(devices)}
+            className="mt-1.5 rounded-md bg-primary px-2 py-0.5 text-[12.5px] font-medium text-primary-foreground"
+          >
+            Listen to {devices.call}
+          </button>
+        </div>
+        <IconButton size="sm" label="Keep listening to the current device" onClick={dismissAudioCheck}>
+          <X />
+        </IconButton>
+      </div>
+    );
+  }
   return (
     <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-white/[0.07] bg-danger/[0.12] px-3 py-2 text-[13px]">
       <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />

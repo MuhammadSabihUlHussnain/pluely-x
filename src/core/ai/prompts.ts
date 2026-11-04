@@ -52,6 +52,13 @@ export const ASK_NOW_INSTRUCTION =
 
 export const TYPED_INSTRUCTION = "Answer the user's question in the answer format.";
 
+/**
+ * "Answer it" on a line from the other side that wasn't answered automatically. The mode
+ * prompt may tell the model to output the sentinel for small talk and logistics; the user
+ * has explicitly asked for an answer, so that rule is overridden here.
+ */
+export const HEARD_ANSWER_INSTRUCTION = `The user clicked "Answer it" on the latest Them turn, so they want something to say to it. Answer it now in the answer format, as what the user should say. If it's small talk or logistics, a sentence or two is enough. Do not output ${NULL_SENTINEL}: the user asked for an answer.`;
+
 export const SCREEN_INSTRUCTION: Record<Mode, string> = {
   coding:
     "Solve the problem shown in the screenshot. Use the coding answer format with complete code under Details.",

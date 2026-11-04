@@ -4,7 +4,7 @@ import type { LlmTransport } from "../ai/run";
 import { DEFAULT_SETTINGS } from "../defaults";
 import type { LlmEvent, Mode, TurnEvent } from "../types";
 import { memoryCardSink, type Card } from "./cards";
-import { AnswerPipeline } from "./pipeline";
+import { AnswerPipeline, type PipelineDeps } from "./pipeline";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 const usage = { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
@@ -61,14 +61,20 @@ function turn(turnId: string, text: string, source: "them" | "me" = "them", ques
   return { type: "turn", source, turnId, text, t0Ms: 0, t1Ms: 1000, reason: "speechFinal", question };
 }
 
-function setup(script: (body: { messages: unknown[] }, n: number) => Step, mode: Mode = "interview") {
+function setup(
+  script: (body: { messages: unknown[] }, n: number) => Step,
+  mode: Mode = "interview",
+  extra: Partial<PipelineDeps> = {},
+) {
   const transport = fakeTransport(script);
   const cards = memoryCardSink();
   const completed: Card[] = [];
+  const logs: string[] = [];
   let reqN = 0;
   let cardN = 0;
   const state = { mode };
   const pipeline = new AnswerPipeline({
+    log: (m) => void logs.push(m),
     transport,
     cards,
     mode: () => state.mode,
@@ -79,8 +85,9 @@ function setup(script: (body: { messages: unknown[] }, n: number) => Step, mode:
     ],
     onComplete: (c) => void completed.push(c),
     ids: { request: () => `req${++reqN}`, card: () => `card${++cardN}` },
+    ...extra,
   });
-  return { pipeline, transport, cards, completed, state };
+  return { pipeline, transport, cards, completed, state, logs };
 }
 
 function lastUserText(body: { messages: unknown[] }): string {
@@ -88,20 +95,28 @@ function lastUserText(body: { messages: unknown[] }): string {
 }
 
 describe("question pipeline", () => {
-  it("drops cards whose stream starts with ∅ and cancels the request", async () => {
+  it("turns a ∅ answer into a skipped card and cancels the request", async () => {
     const { pipeline, transport, cards, completed } = setup(() => ({ events: answer(NULL_SENTINEL) }));
     expect(pipeline.onTurn(turn("t1", "How we do things here is a bit different."))).toBe(true);
     await pipeline.idle();
-    expect(cards.cards).toHaveLength(0);
+    expect(cards.cards).toHaveLength(1);
+    expect(cards.cards[0]).toMatchObject({
+      kind: "heard",
+      heardReason: "not_question",
+      status: "done",
+      content: "",
+      provisional: false,
+      question: "How we do things here is a bit different.",
+    });
     expect(transport.cancelled).toEqual(["req1"]);
     expect(completed).toHaveLength(0);
   });
 
-  it("drops ∅ even when it arrives after whitespace", async () => {
+  it("recognises ∅ even when it arrives after whitespace", async () => {
     const { pipeline, cards } = setup(() => ({ events: answer(`  \n${NULL_SENTINEL}`) }));
     pipeline.onTurn(turn("t1", "What a day."));
     await pipeline.idle();
-    expect(cards.cards).toHaveLength(0);
+    expect(cards.cards.map((c) => [c.kind, c.heardReason, c.content])).toEqual([["heard", "not_question", ""]]);
   });
 
   it("streams a real answer into a card and persists it once", async () => {
@@ -324,5 +339,225 @@ describe("question pipeline", () => {
     await pipeline.idle();
     expect(transport.cancelled).toEqual(["req1"]);
     expect(cards.get(id)).toBeUndefined(); // nothing shown yet → removed
+  });
+
+  // ---- one pipeline, many conversations (the "stops answering after a restart" bug) ----
+
+  it("answers the first questions of a second listening session after reset()", async () => {
+    const { pipeline, transport, cards } = setup(() => ({ events: answer("Sure.") }));
+    expect(pipeline.onTurn(turn("them-t1", "Can you walk me through your resume?"))).toBe(true);
+    expect(pipeline.onTurn(turn("m1", "Yes, I started in audit and moved to banking.", "me"))).toBe(false);
+    expect(pipeline.onTurn(turn("them-t2", "Why investment banking?"))).toBe(true);
+    await pipeline.idle();
+    expect(transport.calls).toHaveLength(2);
+
+    // Listening stops and starts again: the native turn ids restart at them-t1.
+    pipeline.reset();
+    cards.cards.length = 0;
+    expect(pipeline.onTurn(turn("them-t1", "How do you value a company?"))).toBe(true);
+    expect(pipeline.onTurn(turn("m2", "There are three main methods to use.", "me"))).toBe(false);
+    expect(pipeline.onTurn(turn("them-t2", "What is a DCF?"))).toBe(true);
+    await pipeline.idle();
+    expect(transport.calls).toHaveLength(4);
+    expect(cards.cards.map((c) => [c.question, c.status])).toEqual([
+      ["How do you value a company?", "done"],
+      ["What is a DCF?", "done"],
+    ]);
+  });
+
+  it("without reset() a repeated turn id is ignored, and the log says why", async () => {
+    const { pipeline, transport, logs } = setup(() => ({ events: answer("Sure.") }));
+    pipeline.onTurn(turn("them-t1", "Can you walk me through your resume?"));
+    await pipeline.idle();
+    expect(pipeline.onTurn(turn("them-t1", "How do you value a company?"))).toBe(false);
+    expect(transport.calls).toHaveLength(1);
+    expect(logs).toContain("turn them-t1 words=6 -> skipped: already handled");
+  });
+
+  it("reset() cancels a running answer and forgets pending question pieces", async () => {
+    const { pipeline, transport, cards } = setup((_b, n) =>
+      n === 0 ? { events: [{ type: "thinking" }], hang: true } : { events: answer("Fresh.") },
+    );
+    pipeline.onTurn(turn("them-t1", "If net income is a hundred,"));
+    pipeline.onTurn(turn("them-t2", "what is the P/E?"));
+    await tick();
+    pipeline.reset();
+    cards.cards.length = 0;
+    pipeline.onTurn(turn("them-t1", "Tell me about yourself."));
+    await pipeline.idle();
+    expect(transport.cancelled).toContain("req1");
+    expect(cards.cards.map((c) => c.question)).toEqual(["Tell me about yourself."]);
+  });
+
+  it("never merges a piece from another session's clock", async () => {
+    const { pipeline, cards } = setup(() => ({ events: answer("Net debt is 50.") }));
+    // An hour into the old session...
+    pipeline.onTurn({ ...turn("old-t9", "So if net income is a hundred"), t1Ms: 3_600_000 });
+    // ...and seconds into a new one, without a reset in between.
+    pipeline.onTurn({ ...turn("new-t1", "Calculate the net debt."), t1Ms: 5_000 });
+    await pipeline.idle();
+    expect(cards.cards.map((c) => c.question)).toEqual(["Calculate the net debt."]);
+  });
+
+  // ---- skipped (null) questions ----
+
+  it("answers a skipped question on request and doesn't repeat it in the next question", async () => {
+    const { pipeline, transport, cards, completed } = setup((_b, n) =>
+      n === 0 ? { events: answer(NULL_SENTINEL) } : { events: answer(n === 1 ? "Yes, loud and clear." : "Revenue grew.") },
+    );
+    pipeline.onTurn(turn("t1", "Can you hear me okay?"));
+    await pipeline.idle();
+    const skipped = cards.cards[0];
+    expect(skipped).toMatchObject({ kind: "heard", heardReason: "not_question" });
+    pipeline.answerHeard(skipped.id);
+    await pipeline.idle();
+    expect(cards.cards[0]).toMatchObject({ id: skipped.id, kind: "auto", status: "done", content: "Yes, loud and clear." });
+    expect(cards.cards[0].heardReason).toBeUndefined();
+    expect(completed.map((c) => c.id)).toEqual([skipped.id]);
+    pipeline.onTurn(turn("t2", "What happened to revenue?"));
+    await pipeline.idle();
+    expect(cards.cards[1].question).toBe("What happened to revenue?");
+    expect(transport.calls).toHaveLength(3);
+  });
+
+  it("removes a skipped card once an answer that includes it is on screen", async () => {
+    const { pipeline, cards } = setup((_b, n) => (n === 0 ? { events: answer(NULL_SENTINEL) } : { events: answer("EV is 1,200.") }));
+    pipeline.onTurn(turn("t1", "Okay so what we'll do now is a quick technical."));
+    await pipeline.idle();
+    expect(cards.cards.map((c) => c.kind)).toEqual(["heard"]);
+    pipeline.onTurn(turn("t2", "What's the enterprise value if equity is 1,000 and net debt 200?"));
+    await pipeline.idle();
+    expect(cards.cards.map((c) => c.kind)).toEqual(["auto"]);
+    expect(cards.cards[0].question).toBe(
+      "Okay so what we'll do now is a quick technical. What's the enterprise value if equity is 1,000 and net debt 200?",
+    );
+  });
+
+  it("keeps only the latest skipped question", async () => {
+    const { pipeline, cards } = setup(() => ({ events: answer(NULL_SENTINEL) }));
+    pipeline.onTurn(turn("t1", "How's the weather there?"));
+    await pipeline.idle();
+    pipeline.onTurn(turn("m1", "Pretty sunny over here today.", "me"));
+    pipeline.onTurn(turn("t2", "Did you find the office okay?"));
+    await pipeline.idle();
+    expect(cards.cards.map((c) => [c.kind, c.question])).toEqual([["heard", "Did you find the office okay?"]]);
+  });
+
+  it("Answer it while the skipped stream is still closing isn't undone by the old stream", async () => {
+    const base = fakeTransport((_b, n) => (n === 0 ? { events: answer(NULL_SENTINEL), hang: true } : { events: answer("Here's how.") }));
+    // The old stream's cancellation lands late.
+    const transport = {
+      stream: base.stream,
+      cancel: async (id: string) => {
+        for (let i = 0; i < 20; i++) await tick();
+        await base.cancel(id);
+      },
+    };
+    const cards = memoryCardSink();
+    let reqN = 0;
+    let cardN = 0;
+    const pipeline = new AnswerPipeline({
+      transport,
+      cards,
+      mode: () => "interview",
+      promptContext: async (m) => ({ mode: m, modePrompt: DEFAULT_MODE_PROMPTS[m], brief: null, ai: DEFAULT_SETTINGS.ai }),
+      transcript: () => [],
+      ids: { request: () => `req${++reqN}`, card: () => `card${++cardN}` },
+    });
+    pipeline.onTurn(turn("t1", "Could you share your screen?"));
+    for (let i = 0; i < 12 && cards.cards[0]?.kind !== "heard"; i++) await tick();
+    expect(cards.cards[0]).toMatchObject({ kind: "heard", heardReason: "not_question" });
+    pipeline.answerHeard("card1");
+    await pipeline.idle();
+    expect(cards.cards).toHaveLength(1);
+    expect(cards.cards[0]).toMatchObject({ id: "card1", kind: "auto", status: "done", content: "Here's how." });
+  });
+
+  it("Answer it shows 'Nothing to answer' instead of a bare null when Claude still declines", async () => {
+    const { pipeline, cards, completed } = setup(() => ({ events: answer(NULL_SENTINEL) }));
+    pipeline.onTurn(turn("t1", "Can you hear me okay?"));
+    await pipeline.idle();
+    pipeline.answerHeard(cards.cards[0].id);
+    await pipeline.idle();
+    expect(cards.cards[0]).toMatchObject({ kind: "auto", status: "error", content: "" });
+    expect(cards.cards[0].error).toMatchObject({ title: "Nothing to answer", action: "retry" });
+    expect(completed).toHaveLength(0);
+  });
+
+  // ---- live-session robustness ----
+
+  it("a stray remark after the user spoke doesn't replace the pending answer", async () => {
+    // Seen live: the answer request hung, the user started answering, the interviewer said
+    // "mm-hmm", and that one word replaced the real question.
+    const { pipeline, transport, cards } = setup((_b, n) =>
+      n === 0 ? { events: [{ type: "start", requestId: "x", model: "m" }, { type: "thinking" }], hang: true } : { events: answer("x") },
+    );
+    expect(pipeline.onTurn(turn("t1", "How would you think about the cost of capital for a startup?"))).toBe(true);
+    await tick();
+    pipeline.onTurn(turn("m1", "So I'd start with the risk-free rate and then", "me"));
+    expect(pipeline.onTurn(turn("t2", "Mm-hmm."))).toBe(false);
+    expect(transport.cancelled).toEqual([]);
+    expect(cards.cards.map((c) => c.question)).toEqual(["How would you think about the cost of capital for a startup?"]);
+    pipeline.stopAll();
+    await pipeline.idle();
+  });
+
+  it("retries a request that gets no reply at all, on the same card", async () => {
+    const { pipeline, transport, cards, logs } = setup(
+      (_b, n) => (n === 0 ? { events: [], hang: true } : { events: answer("Recovered answer.") }),
+      "interview",
+      { firstResponseMs: 30 },
+    );
+    pipeline.onTurn(turn("t1", "Why this firm?"));
+    await new Promise((r) => setTimeout(r, 80));
+    await pipeline.idle();
+    expect(transport.cancelled).toEqual(["req1"]);
+    expect(transport.calls).toHaveLength(2);
+    expect(cards.cards).toHaveLength(1);
+    expect(cards.cards[0]).toMatchObject({ id: "card1", status: "done", content: "Recovered answer." });
+    expect(logs).toContain("answer card1 auto -> no reply in 0s, retrying (attempt 2)");
+  });
+
+  it("gives up after a second hung attempt with a retryable error", async () => {
+    const { pipeline, cards } = setup(() => ({ events: [], hang: true }), "interview", { firstResponseMs: 30 });
+    pipeline.onTurn(turn("t1", "Why this firm?"));
+    await new Promise((r) => setTimeout(r, 150));
+    await pipeline.idle();
+    expect(cards.cards[0]).toMatchObject({ status: "error" });
+    expect(cards.cards[0].error).toMatchObject({ code: "no_response", action: "retry", retryable: true });
+  });
+
+  it("doesn't retry a slow answer that has started replying", async () => {
+    const { pipeline, transport, cards } = setup(
+      () => ({ events: answer("Slow but fine, streamed in many small pieces over time.") }),
+      "interview",
+      { firstResponseMs: 20 },
+    );
+    pipeline.onTurn(turn("t1", "Why this firm?"));
+    await pipeline.idle();
+    expect(transport.calls).toHaveLength(1);
+    expect(cards.cards[0]).toMatchObject({ status: "done", content: "Slow but fine, streamed in many small pieces over time." });
+  });
+
+  // ---- diagnostics ----
+
+  it("logs every Them turn decision and answer outcome without transcript text", async () => {
+    const { pipeline, logs } = setup((_b, n) => (n === 0 ? { events: answer(NULL_SENTINEL) } : { events: answer("Because of the deal flow.") }));
+    pipeline.onTurn(turn("them-t1", "Thanks for joining today."));
+    pipeline.onTurn(turn("them-t2", "Do you have a minute?"));
+    await pipeline.idle();
+    pipeline.onTurn(turn("them-t3", "Why this bank?"));
+    await pipeline.idle();
+    pipeline.reset();
+    expect(logs).toEqual([
+      "turn them-t1 words=4 filter=none -> skipped: not a question",
+      "turn them-t2 words=5 filter=question-mark -> answering card1 pieces=2",
+      expect.stringMatching(/^answer card1 auto -> not a question \(null\) ms=\d+$/),
+      "turn them-t3 words=3 filter=question-mark -> answering card2 pieces=3",
+      expect.stringMatching(/^answer card2 auto -> shown first_text_ms=\d+$/),
+      expect.stringMatching(/^answer card2 auto -> done ms=\d+ chars=25$/),
+      "reset (forgot 3 answered turns, 3 question pieces)",
+    ]);
+    for (const l of logs) expect(l).not.toMatch(/joining|minute|bank|deal/i);
   });
 });

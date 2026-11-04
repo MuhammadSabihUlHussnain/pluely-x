@@ -33,7 +33,9 @@ function kindLabel(c: Card): { text: string; tone: "them" | "you" | "muted" } {
     case "summary":
       return { text: "Session summary", tone: "muted" };
     case "heard":
-      return { text: "Them · question heard", tone: "them" };
+      return c.heardReason === "not_question"
+        ? { text: "Them · not answered", tone: "muted" }
+        : { text: "Them · question heard", tone: "them" };
   }
 }
 
@@ -47,6 +49,7 @@ export const AnswerCard = memo(function AnswerCard({ card }: { card: Card }) {
       className={cn(
         "card-in rounded-xl border p-3",
         isError ? "border-danger/35 bg-danger/[0.09]" : "glass-raised",
+        card.kind === "heard" && card.heardReason === "not_question" && "opacity-75 transition-opacity hover:opacity-100",
       )}
       aria-busy={busy}
     >
@@ -95,9 +98,23 @@ export const AnswerCard = memo(function AnswerCard({ card }: { card: Card }) {
   );
 });
 
-/** A question heard in a mode that doesn't answer on its own. */
+/** A question that wasn't answered on its own: the mode doesn't auto-answer, or Claude skipped it. */
 function HeardBody({ card }: { card: Card }) {
   const label = MODE_META[card.mode]?.label ?? "This";
+  if (card.heardReason === "not_question") {
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => pipeline.answerHeard(card.id)}
+          className="rounded-lg bg-primary px-3 py-1.5 text-[13.5px] font-semibold text-primary-foreground hover:opacity-90"
+        >
+          Answer it
+        </button>
+        <span className="text-[12.5px] text-muted-foreground">Skipped: didn't look like a question for you.</span>
+      </div>
+    );
+  }
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2">
       <button

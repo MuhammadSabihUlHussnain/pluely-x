@@ -2,13 +2,14 @@
 // what it safely can, without ending the conversation. The audio fix restarts each capture
 // in turn, which re-opens it on the *current* default devices and reconnects Deepgram.
 
-import type { AudioCheck } from "./audioCheck";
+import type { AudioCheck, CallDevices } from "./audioCheck";
 
 export type ScanStepId =
   | "keys"
   | "claude"
   | "deepgram"
   | "devices"
+  | "route"
   | "mode"
   | "capture"
   | "answers"
@@ -23,7 +24,9 @@ export interface ScanStep {
   status: ScanStatus;
   detail?: string;
   /** Where the user can fix what the scan couldn't. */
-  action?: "settings";
+  action?: "settings" | "use_call_device";
+  /** For "use_call_device": the device to switch to. */
+  devices?: CallDevices;
 }
 
 export interface ScanState {
@@ -39,6 +42,7 @@ export const STEP_LABELS: Record<ScanStepId, string> = {
   claude: "Claude reachable",
   deepgram: "Deepgram (captions) reachable",
   devices: "Microphone and speakers found",
+  route: "Listening where calls play",
   mode: "Mode answers automatically",
   capture: "Audio capture restarted on current devices",
   answers: "No stuck answers",
@@ -51,6 +55,7 @@ export const STEP_ORDER: ScanStepId[] = [
   "claude",
   "deepgram",
   "devices",
+  "route",
   "mode",
   "capture",
   "answers",
@@ -62,6 +67,8 @@ export interface ScanDeps {
   keysStatus(): Promise<{ anthropic: boolean; deepgram: boolean }>;
   testKey(provider: "anthropic" | "deepgram"): Promise<{ ok: boolean; message?: string }>;
   devices(): Promise<{ inputs: number; outputs: number }>;
+  /** Call app's output vs the captured one when they differ (null when they match or can't tell). */
+  callDevice(): Promise<CallDevices | null>;
   listening(): boolean;
   modeAutoAnswers(): { label: string; autoAnswers: boolean };
   /** Turns a source off then on again; resolves once it is capturing again (false on timeout). */
@@ -124,6 +131,17 @@ export async function runQuickScan(deps: ScanDeps): Promise<ScanStep[]> {
     return { status: "ok" };
   });
 
+  await step("route", async () => {
+    const m = await deps.callDevice();
+    if (!m) return { status: "ok" };
+    return {
+      status: "warn",
+      detail: `Calls usually play on "${m.call}" (Windows' communications device), but Pluely X listens to "${m.capture}". If the interviewer is on "${m.call}", switch.`,
+      action: "use_call_device",
+      devices: m,
+    };
+  });
+
   await step("mode", async () => {
     const m = deps.modeAutoAnswers();
     return m.autoAnswers
@@ -156,6 +174,8 @@ export async function runQuickScan(deps: ScanDeps): Promise<ScanStep[]> {
     if (!listening) return notListening;
     const v = await deps.runAudioCheck();
     if (v.phase === "ok") return { status: "ok", detail: v.how === "test_tone" ? "Test beep heard." : "Call audio heard." };
+    // The beep was heard; where the call plays is the "route" step's warning.
+    if (v.phase === "problem" && v.kind === "other_device") return { status: "ok", detail: "Test beep heard." };
     if (v.phase === "problem" && v.kind === "unverified") {
       return { status: "warn", detail: "Couldn't play the test beep; play any sound and watch the Them meter." };
     }

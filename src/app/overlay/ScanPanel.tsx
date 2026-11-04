@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck, CircleMinus, CircleX, Loader2, RotateCw, Wrench, X } from "lucide-react";
 import { IconButton } from "@/components/common";
 import { scanVerdict, type ScanStatus } from "@/core/live/quickScan";
-import { closeQuickScan, runQuickScanNow, useLive } from "@/core/live/session";
+import { closeQuickScan, listenOnCallDevice, runQuickScanNow, useLive } from "@/core/live/session";
 import { cn } from "@/lib/utils";
 import { openDashboard } from "./controller";
 
@@ -81,6 +81,15 @@ export function ScanPanel() {
                 {s.label}
               </span>
               {s.detail && s.status !== "ok" ? <p className="text-muted-foreground">{s.detail}</p> : null}
+              {s.action === "use_call_device" && s.devices && s.status === "warn" ? (
+                <button
+                  type="button"
+                  onClick={() => void listenOnCallDevice(s.devices!)}
+                  className="mt-1 rounded-md bg-primary px-2 py-0.5 text-[12.5px] font-medium text-primary-foreground"
+                >
+                  Listen to {s.devices.call}
+                </button>
+              ) : null}
             </div>
           </li>
         ))}

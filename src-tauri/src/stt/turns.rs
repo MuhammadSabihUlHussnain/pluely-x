@@ -5,6 +5,10 @@
 //! the source's audio went idle), or on `UtteranceEnd` if finals are still pending (so
 //! speech_final followed by UtteranceEnd yields one turn, not two). `stop` flushes
 //! whatever is left when the source or session stops.
+//!
+//! Turn ids are unique across sessions (`them-t1-<session tag>`): the frontend keeps the
+//! ids it has answered, and plain `them-t1` repeating in the next session once made it
+//! ignore that session's first questions.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +40,8 @@ pub struct TurnTracker {
     source: Source,
     pending: Vec<(String, i64, i64)>,
     next_id: u32,
+    /// Appended to every turn id (empty: plain `them-t1`).
+    tag: String,
 }
 
 /// The cheap question hint: the turn ends with `?`.
@@ -50,7 +56,15 @@ impl TurnTracker {
             source,
             pending: Vec::new(),
             next_id: 1,
+            tag: String::new(),
         }
+    }
+
+    /// A tracker whose ids carry the session (first 8 characters of its id), so they never
+    /// repeat across sessions.
+    pub fn for_session(source: Source, session_id: &str) -> Self {
+        let tag: String = session_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+        Self { tag, ..Self::new(source) }
     }
 
     /// A final segment. Empty text still counts as a speech_final / finalize marker.
@@ -95,7 +109,11 @@ impl TurnTracker {
             .map(|p| p.0)
             .collect::<Vec<_>>()
             .join(" ");
-        let turn_id = format!("{}-t{}", self.source.as_str(), self.next_id);
+        let turn_id = if self.tag.is_empty() {
+            format!("{}-t{}", self.source.as_str(), self.next_id)
+        } else {
+            format!("{}-t{}-{}", self.source.as_str(), self.next_id, self.tag)
+        };
         self.next_id += 1;
         Some(Turn {
             source: self.source,
@@ -134,6 +152,19 @@ mod tests {
             out.extend(r);
         }
         out
+    }
+
+    #[test]
+    fn session_ids_never_repeat_across_sessions() {
+        let mut a = TurnTracker::for_session(Source::Them, "3f9a2b1c-77e0-4c4e-9d2b-0a1b2c3d4e5f");
+        let mut b = TurnTracker::for_session(Source::Them, "8c0d1e2f-1111-2222-3333-444455556666");
+        let ta = a.on_final("Why banking?", 0, 900, true, false).unwrap();
+        let tb = b.on_final("Why banking?", 0, 900, true, false).unwrap();
+        assert_eq!(ta.turn_id, "them-t1-3f9a2b1c");
+        assert_eq!(tb.turn_id, "them-t1-8c0d1e2f");
+        assert_eq!(a.on_final("And why us?", 1000, 1900, true, false).unwrap().turn_id, "them-t2-3f9a2b1c");
+        let mut me = TurnTracker::for_session(Source::Me, "3f9a2b1c-77e0");
+        assert_eq!(me.on_final("Sure.", 0, 400, true, false).unwrap().turn_id, "me-t1-3f9a2b1c");
     }
 
     #[test]

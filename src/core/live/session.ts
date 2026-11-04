@@ -26,10 +26,12 @@ import type {
 import { newId, newRequestId } from "../util";
 import {
   AUDIO_CHECK_IDLE,
+  callDeviceMismatch,
   playCheckTone,
   runAudioCheck,
   ThemSilenceWatch,
   type AudioCheck,
+  type CallDevices,
 } from "./audioCheck";
 import { cardSink, useCards, type Card } from "./cards";
 import { runQuickScan, SCAN_IDLE, type ScanState } from "./quickScan";
@@ -229,12 +231,14 @@ export const pipeline = new AnswerPipeline({
   promptContext,
   transcript: transcriptLines,
   onComplete: persistCard,
+  // Every turn decision and answer outcome, so "it heard them but didn't answer" can be traced.
+  log: (m) => void native.logWrite("info", `answers: ${m}`).catch(() => {}),
 });
 
 /** Starts a fresh conversation: clears cards, transcript and notes. */
 export function newConversation(): void {
   if (get().status !== "idle") return;
-  pipeline.stopAll();
+  pipeline.reset();
   useCards.getState().clear();
   set({
     conversationId: null,
@@ -336,6 +340,20 @@ function handleEvent(ev: SessionEvent): void {
 
 let checkRun = 0;
 let silenceWatch: ThemSilenceWatch | null = null;
+/** Set by the last check when calls likely play on a device Pluely X isn't listening to. */
+let callDevices: CallDevices | null = null;
+
+/** The output being captured and whether the call app's device differs from it. */
+async function outputRoute(): Promise<{ captured: { name: string; isDefault: boolean } | null; mismatch: CallDevices | null } | null> {
+  try {
+    const { outputs } = await native.audioListDevices();
+    const capturedId = get().sources.them.device?.deviceId ?? useSettings.getState().settings.audio.outputDeviceId;
+    const captured = (capturedId ? outputs.find((d) => d.id === capturedId) : undefined) ?? outputs.find((d) => d.isDefault);
+    return { captured: captured ?? null, mismatch: callDeviceMismatch(outputs, capturedId) };
+  } catch {
+    return null;
+  }
+}
 
 function logAudio(level: "info" | "warn", message: string): void {
   void native.logWrite(level, `health: ${message}`).catch(() => {});
@@ -346,21 +364,75 @@ export async function runAudioCheckNow(): Promise<void> {
   const run = ++checkRun;
   set({ audioCheck: { phase: "checking" } });
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  // Filled in by playTone (a holder, so TypeScript doesn't narrow it to its initial value).
+  const probe: { route: Awaited<ReturnType<typeof outputRoute>>; nonDefault?: string } = { route: null };
   const verdict = await runAudioCheck({
     themLevel: () => get().levels.them,
     themCapturing: () => {
       const them = get().sources.them;
       return them.state !== "error" && (get().levels.them !== null || !!them.device);
     },
-    playTone: playCheckTone,
+    playTone: async () => {
+      const route = (probe.route = await outputRoute());
+      // The beep plays on the default output; it can't reach a different device being captured.
+      if (route?.captured && !route.captured.isDefault) {
+        probe.nonDefault = route.captured.name;
+        return false;
+      }
+      return playCheckTone();
+    },
     sleep,
     now: () => Date.now(),
     cancelled: () => run !== checkRun || get().status === "idle" || get().status === "stopping",
   });
   if (run !== checkRun || !verdict) return;
-  set({ audioCheck: verdict });
-  if (verdict.phase === "problem") logAudio("warn", `problem=${verdict.kind}`);
-  else if (verdict.phase === "ok") logAudio("info", `ok via ${verdict.how}`);
+  callDevices = probe.route?.mismatch ?? null;
+  let result: AudioCheck = verdict;
+  if (verdict.phase === "problem" && verdict.kind === "unverified" && probe.nonDefault) {
+    result = { ...verdict, capture: probe.nonDefault };
+  } else if (verdict.phase === "ok" && verdict.how === "test_tone" && callDevices) {
+    // The beep proved the capture works, but not that the call plays on that device.
+    result = { phase: "problem", kind: "other_device", devices: callDevices };
+  }
+  set({ audioCheck: result });
+  if (callDevices) logAudio("warn", `call device differs: call="${callDevices.call}" capture="${callDevices.capture}"`);
+  if (result.phase === "problem") logAudio("warn", `problem=${result.kind}`);
+  else if (result.phase === "ok") logAudio("info", `ok via ${result.how}`);
+}
+
+/**
+ * Listens to the call app's output device instead (and remembers it in Settings). The test
+ * beep can't reach a non-default device, so the check isn't re-run; the mid-session watch
+ * still catches a silent capture.
+ */
+export async function listenOnCallDevice(devices: CallDevices): Promise<void> {
+  await useSettings
+    .getState()
+    .update({ audio: { outputDeviceId: devices.callId } })
+    .catch(() => {});
+  if (get().status === "live") {
+    const before = deviceOpens.them;
+    await native.sessionSetSource({ source: "them", deviceId: devices.callId }).catch(() => {});
+    const end = Date.now() + 6000;
+    while (deviceOpens.them === before && Date.now() < end && get().status === "live") {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  callDevices = null;
+  checkRun++;
+  set({ audioCheck: AUDIO_CHECK_IDLE });
+  const scan = get().scan;
+  if (scan.steps.some((s) => s.id === "route")) {
+    set({
+      scan: {
+        ...scan,
+        steps: scan.steps.map((s) =>
+          s.id === "route" ? { ...s, status: "fixed", detail: `Now listening to "${devices.call}".`, action: undefined } : s,
+        ),
+      },
+    });
+  }
+  logAudio("info", "them capture moved to the call (communications) device");
 }
 
 export function dismissAudioCheck(): void {
@@ -382,7 +454,7 @@ function watchTranscript(ev: TranscriptEvent): void {
   }
   if (!ev.isFinal || ev.echo) return;
   if (silenceWatch.onMeFinal(ev.text, Date.now()) && get().audioCheck.phase !== "problem") {
-    set({ audioCheck: { phase: "problem", kind: "mic_only" } });
+    set({ audioCheck: { phase: "problem", kind: "mic_only", devices: callDevices ?? undefined } });
     logAudio("warn", "problem=mic_only (mic heard talking, no interviewer speech)");
   }
 }
@@ -438,6 +510,7 @@ export async function runQuickScanNow(): Promise<void> {
       const d = await native.audioListDevices();
       return { inputs: d.inputs.length, outputs: d.outputs.length };
     },
+    callDevice: async () => (await outputRoute())?.mismatch ?? null,
     listening: () => get().status === "live",
     modeAutoAnswers: () => {
       const meta = MODE_META[mode()];
@@ -486,8 +559,9 @@ export async function startListening(): Promise<void> {
   if (get().status !== "idle") return;
   const m = mode();
   if (!MODE_META[m].listens) await useSettings.getState().setMode("meeting").catch(() => {});
-  // Listening always starts a fresh conversation.
-  pipeline.stopAll();
+  // Listening always starts a fresh conversation. The pipeline must forget the previous
+  // one too: turn ids restart at them-t1 with every session.
+  pipeline.reset();
   useCards.getState().clear();
   set({
     status: "starting",
@@ -639,7 +713,7 @@ async function summarize(sessionId: string): Promise<void> {
   const lines = transcriptLines();
   const answers: HistoryTurn[] = useCards
     .getState()
-    .cards.filter((c) => c.kind !== "summary" && c.status === "done")
+    .cards.filter((c) => c.kind !== "summary" && c.kind !== "heard" && c.status === "done" && c.content.trim())
     .map((c) => ({ question: c.question, answer: c.content, hadScreenshot: !!c.screenshot }));
   if (!lines.length && !answers.length) return;
 

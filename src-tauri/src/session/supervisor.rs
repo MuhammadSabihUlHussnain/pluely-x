@@ -163,7 +163,7 @@ struct SourceRt {
 }
 
 impl SourceRt {
-    fn new(source: Source, opts: &SourceOptions) -> Self {
+    fn new(source: Source, opts: &SourceOptions, session_id: &str) -> Self {
         Self {
             source,
             enabled: opts.enabled,
@@ -189,7 +189,7 @@ impl SourceRt {
             errored: false,
             level: Arc::new(LevelMeter::new()),
             stats: Arc::new(SourceStats::default()),
-            turns: TurnTracker::new(source),
+            turns: TurnTracker::for_session(source, session_id),
             shown_interims: HashSet::new(),
         }
     }
@@ -256,8 +256,8 @@ pub async fn start_session(
     let mut sup = Supervisor {
         session_id: session_id.clone(),
         src: [
-            SourceRt::new(Source::Me, &opts.me),
-            SourceRt::new(Source::Them, &opts.them),
+            SourceRt::new(Source::Me, &opts.me, &session_id),
+            SourceRt::new(Source::Them, &opts.them, &session_id),
         ],
         opts,
         clock,
@@ -653,7 +653,7 @@ impl Supervisor {
             url,
             api_key: self.api_key.clone(),
             first_conn: rt.next_conn,
-            timings: self.timings,
+            timings: self.timings.with_endpointing(self.opts.stt.endpointing_ms),
             dump,
             rng_seed: None,
         };
@@ -717,6 +717,7 @@ impl Supervisor {
                 }
             }
             DgEvent::Transcript(seg) => self.on_transcript(s, seg),
+            DgEvent::CatchUp(seg) => self.on_catch_up(s, seg),
             DgEvent::SpeechStarted { t_ms } => {
                 self.emit(SessionEvent::SpeechStarted { source: s, t_ms });
             }
@@ -749,6 +750,40 @@ impl Supervisor {
                     self.emit(SessionEvent::state(Some(s), StreamState::Idle));
                 }
             }
+        }
+    }
+
+    /// A final recovered from audio buffered during an outage: shown and saved in the
+    /// transcript (echo-flagged like any final), but never a turn: it's history, and
+    /// auto-answering it would answer a question that has already moved on.
+    fn on_catch_up(&mut self, s: Source, seg: Segment) {
+        if !seg.is_final || seg.text.trim().is_empty() {
+            return;
+        }
+        let mut echo = None;
+        let mut patches = Vec::new();
+        if self.opts.echo_dedup {
+            match s {
+                Source::Me => echo = Some(self.echo.on_me_final(&seg.seg_id, &seg.text, seg.t0_ms, seg.t1_ms)),
+                Source::Them => patches = self.echo.on_them_final(&seg.seg_id, &seg.text, seg.t0_ms, seg.t1_ms),
+            }
+        }
+        self.emit(SessionEvent::Transcript {
+            source: s,
+            seg_id: seg.seg_id,
+            conn: seg.conn,
+            is_final: true,
+            speech_final: false,
+            from_finalize: false,
+            text: seg.text,
+            confidence: seg.confidence,
+            t0_ms: seg.t0_ms,
+            t1_ms: seg.t1_ms,
+            speaker: seg.speaker,
+            echo,
+        });
+        for seg_id in patches {
+            self.emit(SessionEvent::TranscriptPatch { seg_id, echo: true });
         }
     }
 

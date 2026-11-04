@@ -287,7 +287,7 @@ function AudioSection() {
       </Row>
       <Row
         label="End of sentence after"
-        description="Silence before a phrase counts as finished. Shorter is snappier; longer cuts people off less."
+        description="Silence before a phrase counts as finished. Shorter is snappier; longer keeps a question asked with pauses in one piece. 700 ms is the default."
       >
         <div className="flex w-[240px] items-center gap-3">
           <Slider

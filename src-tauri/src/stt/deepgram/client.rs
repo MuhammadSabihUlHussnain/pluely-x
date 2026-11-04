@@ -5,7 +5,12 @@
 //!   (c) a 1 s tick (KeepAlive after ≥ 4 s without audio; half-open watchdog), (d) control
 //!   (Mute → Finalize; Stop → CloseStream, then read results until close or 3 s);
 //! - on failure: classify fatal vs retryable, wait with full-jitter backoff while buffering
-//!   up to 10 s of frames, reconnect (`conn += 1`, fresh [`Timeline`]) and replay the backlog.
+//!   up to 90 s of frames, reconnect (`conn += 1`, fresh [`Timeline`]) and replay the newest
+//!   10 s of the backlog on the new socket. Anything older goes to a separate, short-lived
+//!   catch-up socket ([`run_catch_up`]) so it reaches the transcript without delaying live
+//!   audio: Deepgram works through a burst at only ~1.2× real time (measured: 90 s of
+//!   buffered speech took 75 s), so replaying a long backlog on the live socket would put
+//!   every caption and answer a minute behind.
 //!
 //! Never logs the key, headers or transcript text (transcripts only at debug level).
 
@@ -44,8 +49,13 @@ pub struct DgTimings {
     pub connect_timeout: Duration,
     pub backoff: BackoffConfig,
     pub rate_limit_min: Duration,
-    /// Frames kept while disconnected.
+    /// Frames kept while disconnected. 90 s (~2.9 MB of 16 kHz PCM per source) rides out a
+    /// Wi-Fi or DNS drop of a minute or more; 10 s lost 13 s of an interview to a ~70 s outage.
     pub backlog: Duration,
+    /// How much of the backlog the reconnected live socket replays (the rest goes to a
+    /// catch-up socket). Keeps a question asked just before the reconnect in the live flow
+    /// while bounding the lag the replay adds.
+    pub live_replay: Duration,
     /// After real speech, send Finalize once the audio has stayed below `quiet_db` this
     /// long (or frames stopped for `QUIET_GAP`). Deepgram otherwise sometimes holds the
     /// last final for ~5 s on a quiet loopback stream. `None` disables it.
@@ -57,10 +67,37 @@ pub struct DgTimings {
 /// Fallback for `quiet_finalize`: frames stopped arriving altogether after speech.
 const QUIET_GAP: Duration = Duration::from_secs(1);
 
+/// Default for [`DgTimings::backlog`].
+pub const DEFAULT_BACKLOG: Duration = Duration::from_secs(90);
+
+/// Default for [`DgTimings::live_replay`].
+pub const DEFAULT_LIVE_REPLAY: Duration = Duration::from_secs(10);
+
+/// Catch-up sockets number their segments from here (`them-1002-0` caught up for conn 2),
+/// so their segment ids never collide with a live socket's.
+pub const CATCH_UP_CONN_BASE: u32 = 1000;
+
+/// Default for [`DgTimings::quiet_finalize`].
+pub const DEFAULT_QUIET_FINALIZE: Duration = Duration::from_millis(600);
+
+impl DgTimings {
+    /// The quiet-finalize delay for a session with Deepgram `endpointing` = `endpointing_ms`.
+    /// It is a fallback for when Deepgram holds a final on quiet audio, so it must never
+    /// fire before Deepgram's own endpoint would: a 600 ms finalize under a 700 ms endpoint
+    /// would end every turn at 600 ms and make the setting meaningless.
+    pub fn with_endpointing(mut self, endpointing_ms: u32) -> Self {
+        if let Some(q) = self.quiet_finalize {
+            let floor = Duration::from_millis(u64::from(endpointing_ms) + 150);
+            self.quiet_finalize = Some(q.max(floor));
+        }
+        self
+    }
+}
+
 impl Default for DgTimings {
     fn default() -> Self {
         Self {
-            quiet_finalize: Some(Duration::from_millis(600)),
+            quiet_finalize: Some(DEFAULT_QUIET_FINALIZE),
             quiet_db: -45.0,
             keepalive_after: Duration::from_secs(4),
             tick: Duration::from_secs(1),
@@ -69,7 +106,8 @@ impl Default for DgTimings {
             connect_timeout: Duration::from_secs(10),
             backoff: BackoffConfig::default(),
             rate_limit_min: super::backoff::RATE_LIMIT_MIN,
-            backlog: Duration::from_secs(10),
+            backlog: DEFAULT_BACKLOG,
+            live_replay: DEFAULT_LIVE_REPLAY,
         }
     }
 }
@@ -123,6 +161,9 @@ pub enum DgEvent {
         message: String,
     },
     Transcript(Segment),
+    /// A final from a catch-up socket (audio buffered during an outage, older than what the
+    /// live socket replayed). Transcript only: it is history, so it never forms a turn.
+    CatchUp(Segment),
     SpeechStarted { t_ms: i64 },
     UtteranceEnd { last_word_end_ms: i64 },
     /// Unrecoverable (bad key, no credit, rejected request). The client has exited.
@@ -197,6 +238,19 @@ impl Backlog {
         let f = self.q.pop_front()?;
         self.ms -= f.duration_ms();
         Some(f)
+    }
+
+    /// Takes everything but the newest `keep` out of the backlog (oldest first).
+    fn split_older(&mut self, keep: Duration) -> Vec<AudioFrame> {
+        let keep_ms = keep.as_millis() as u64;
+        let mut older = Vec::new();
+        while self.ms > keep_ms {
+            match self.pop() {
+                Some(f) => older.push(f),
+                None => break,
+            }
+        }
+        older
     }
 }
 
@@ -273,6 +327,20 @@ pub async fn run_client(
                 ever_connected = true;
                 attempt = 0;
                 ctx.emit(DgEvent::Live { conn });
+                let older = backlog.split_older(timings.live_replay);
+                if !older.is_empty() {
+                    tokio::spawn(run_catch_up(CatchUpJob {
+                        url: url.clone(),
+                        api_key: api_key.clone(),
+                        timings,
+                        conn: CATCH_UP_CONN_BASE + conn,
+                        frames: older,
+                        source,
+                        gen,
+                        events: ctx.events.clone(),
+                        stats: ctx.stats.clone(),
+                    }));
+                }
                 let started = Instant::now();
                 match run_connection(ws, conn, &mut ctx, &mut frames, &mut control, &mut backlog).await {
                     ConnEnd::Stopped => break 'session DgOutcome::Stopped,
@@ -557,21 +625,105 @@ where
     let _ = tokio::time::timeout(Duration::from_millis(500), sink.close()).await;
 }
 
+fn to_segment(r: &protocol::ResultsMsg, source: Source, conn: u32, timeline: &Timeline) -> Segment {
+    Segment {
+        seg_id: r.seg_id(source.as_str(), conn),
+        conn,
+        is_final: r.is_final,
+        speech_final: r.speech_final,
+        from_finalize: r.from_finalize,
+        text: r.transcript().to_string(),
+        confidence: r.confidence(),
+        t0_ms: timeline.to_session_ms(r.start),
+        t1_ms: timeline.to_session_ms(r.start + r.duration),
+        speaker: r.speaker(),
+    }
+}
+
+/// Older backlog audio for a catch-up socket.
+struct CatchUpJob {
+    url: String,
+    api_key: String,
+    timings: DgTimings,
+    conn: u32,
+    frames: Vec<AudioFrame>,
+    source: Source,
+    gen: u32,
+    events: DgEventTx,
+    stats: Arc<SourceStats>,
+}
+
+/// Transcribes audio buffered during an outage on its own socket, in parallel with the live
+/// one: send it all, CloseStream, forward the finals as [`DgEvent::CatchUp`] until Deepgram
+/// closes. One attempt; if it fails the audio counts as dropped.
+async fn run_catch_up(job: CatchUpJob) {
+    let CatchUpJob {
+        url,
+        api_key,
+        timings,
+        conn,
+        frames,
+        source,
+        gen,
+        events,
+        stats,
+    } = job;
+    let audio_ms: u64 = frames.iter().map(AudioFrame::duration_ms).sum();
+    tracing::info!(source = %source, conn, audio_ms, "deepgram catch-up: transcribing older buffered audio on its own socket");
+    let lost = |why: String| {
+        SourceStats::add(&stats.dropped_ms, audio_ms);
+        tracing::warn!(source = %source, conn, audio_ms, "deepgram catch-up failed, audio dropped: {why}");
+    };
+    let ws = match connect(&url, &api_key, &timings).await {
+        Ok(ws) => ws,
+        Err(f) => return lost(format!("{f:?}")),
+    };
+    let (mut sink, mut stream) = ws.split();
+    let mut timeline = Timeline::new();
+    for f in &frames {
+        if let Err(e) = sink.send(Message::binary(f.pcm.clone())).await {
+            return lost(format!("send failed: {e}"));
+        }
+        timeline.record(f.t_ms, f.samples);
+    }
+    drop(frames);
+    if let Err(e) = sink.send(Message::text(protocol::CLOSE_STREAM)).await {
+        return lost(format!("CloseStream failed: {e}"));
+    }
+    // Deepgram needs roughly the audio's own length to work through it.
+    let deadline = Instant::now() + Duration::from_millis(audio_ms) + Duration::from_secs(30);
+    let mut finals = 0u32;
+    loop {
+        if events.is_closed() {
+            break;
+        }
+        tokio::select! {
+            _ = sleep_until(deadline) => {
+                tracing::warn!(source = %source, conn, finals, "deepgram catch-up timed out");
+                break;
+            }
+            m = stream.next() => match m {
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(ServerMsg::Results(r)) = protocol::parse(text.as_str()) {
+                        if r.is_final && !r.transcript().trim().is_empty() {
+                            finals += 1;
+                            let _ = events.send((source, gen, DgEvent::CatchUp(to_segment(&r, source, conn, &timeline))));
+                        }
+                    }
+                }
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => {}
+            },
+        }
+    }
+    let _ = tokio::time::timeout(Duration::from_millis(500), sink.close()).await;
+    tracing::info!(source = %source, conn, audio_ms, finals, "deepgram catch-up done");
+}
+
 fn handle_text(text: &str, conn: u32, timeline: &Timeline, ctx: &Ctx) {
     match protocol::parse(text) {
         Ok(ServerMsg::Results(r)) => {
-            let seg = Segment {
-                seg_id: r.seg_id(ctx.source.as_str(), conn),
-                conn,
-                is_final: r.is_final,
-                speech_final: r.speech_final,
-                from_finalize: r.from_finalize,
-                text: r.transcript().to_string(),
-                confidence: r.confidence(),
-                t0_ms: timeline.to_session_ms(r.start),
-                t1_ms: timeline.to_session_ms(r.start + r.duration),
-                speaker: r.speaker(),
-            };
+            let seg = to_segment(&r, ctx.source, conn, timeline);
             tracing::debug!(source = %ctx.source, seg = %seg.seg_id, is_final = seg.is_final, text = %seg.text, "transcript");
             ctx.emit(DgEvent::Transcript(seg));
         }

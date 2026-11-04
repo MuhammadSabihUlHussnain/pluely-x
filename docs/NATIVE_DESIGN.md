@@ -116,7 +116,7 @@ loop {
   - The UI shows the captured endpoint name and a meter (Bluetooth hands-free switching).
 - **Frames:**
   - 50 ms frames (800 samples, i16 LE). Each source has a `tokio::mpsc::channel(64)`; the capture thread uses `try_send` and never blocks.
-  - While reconnecting, the Deepgram task keeps a 10 s backlog (drop oldest, count droppedMs) and replays it on reconnect.
+  - While reconnecting, the Deepgram task keeps a 90 s backlog (drop oldest, count droppedMs) and replays it on reconnect.
   - Each sent frame records (conn_sample_offset → t_ms) in that connection's Timeline.
 - **Levels:** a peak-hold AtomicU32 per source. A 100 ms tokio interval swaps both values and emits one `levels` event; silence decays to the floor.
 

@@ -301,7 +301,9 @@ async fn full_pipeline_event_sequence() {
     assert_eq!(turn["text"], "So what would you do?");
     assert_eq!(turn["reason"], "speechFinal");
     assert_eq!(turn["question"], true);
-    assert_eq!(turn["turnId"], "them-t1");
+    // Unique per session: `them-t1-<first 8 of the session id>`.
+    let tag: String = info.session_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+    assert_eq!(turn["turnId"], format!("them-t1-{tag}"));
     wait_event(&events, "utteranceEnd", Duration::from_secs(3), |v| v["type"] == "utteranceEnd").await;
 
     // Levels at 10 Hz: "them" plays a 0.3 tone (≈ -10.5 dBFS peak).

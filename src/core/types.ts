@@ -229,7 +229,7 @@ export interface ShortcutBinding {
 }
 
 export interface AppSettings {
-  version: 1;
+  version: number;
   onboarded: boolean;
   mode: Mode;
   overlay: {

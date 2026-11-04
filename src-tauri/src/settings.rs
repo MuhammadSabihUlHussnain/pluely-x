@@ -16,7 +16,12 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::error::{AppError, AppResult};
 use crate::shortcuts::{self, ShortcutAction};
 
-pub const SETTINGS_VERSION: u32 = 1;
+/// 2: the end-of-sentence pause (`stt.endpointingMs`) default went from 300 ms to 700 ms.
+pub const SETTINGS_VERSION: u32 = 2;
+/// Default `stt.endpointingMs`. 300 ms split questions spoken with natural pauses into
+/// pieces, so answers kept starting on half a question and being cancelled.
+pub const DEFAULT_ENDPOINTING_MS: u32 = 700;
+const OLD_DEFAULT_ENDPOINTING_MS: u64 = 300;
 pub const EVENT_CHANGED: &str = "settings://changed";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,7 +130,7 @@ impl Default for AppSettings {
             },
             stt: SttSettings {
                 language: "en".into(),
-                endpointing_ms: 300,
+                endpointing_ms: DEFAULT_ENDPOINTING_MS,
                 utterance_end_ms: 1000,
                 diarize_them: false,
             },
@@ -293,6 +298,8 @@ pub fn save_atomic(path: &Path, settings: &AppSettings) -> AppResult<()> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadOutcome {
     Loaded,
+    /// Loaded from an older version and upgraded (the file is rewritten).
+    Migrated,
     Created,
     /// The file was unreadable or invalid; it was moved aside and defaults were used.
     Recovered,
@@ -309,10 +316,15 @@ pub fn load_or_default(path: &Path) -> (AppSettings, LoadOutcome) {
             return (AppSettings::default(), LoadOutcome::Recovered);
         }
     };
+    let mut migrated = false;
     let parsed = serde_json::from_slice::<Value>(&bytes)
         .map_err(AppError::from)
-        .and_then(from_value);
+        .and_then(|mut v| {
+            migrated = migrate(&mut v);
+            from_value(v)
+        });
     match parsed {
+        Ok(s) if migrated => (s, LoadOutcome::Migrated),
         Ok(s) => (s, LoadOutcome::Loaded),
         Err(e) => {
             let ts = std::time::SystemTime::now()
@@ -325,6 +337,26 @@ pub fn load_or_default(path: &Path) -> (AppSettings, LoadOutcome) {
             (AppSettings::default(), LoadOutcome::Recovered)
         }
     }
+}
+
+/// Upgrades a settings file written by an older version in place. Returns true when it did.
+///
+/// v1 → v2: a file still on the old 300 ms end-of-sentence default gets the new 700 ms
+/// default; a value the user picked is kept.
+fn migrate(value: &mut Value) -> bool {
+    let Some(obj) = value.as_object_mut() else {
+        return false;
+    };
+    let version = obj.get("version").and_then(Value::as_u64).unwrap_or(0);
+    if version >= u64::from(SETTINGS_VERSION) {
+        return false;
+    }
+    if let Some(stt) = obj.get_mut("stt").and_then(Value::as_object_mut) {
+        if stt.get("endpointingMs").and_then(Value::as_u64) == Some(OLD_DEFAULT_ENDPOINTING_MS) {
+            stt.insert("endpointingMs".into(), Value::from(DEFAULT_ENDPOINTING_MS));
+        }
+    }
+    true
 }
 
 /// Reset one top-level section (or everything when `section` is None).
@@ -494,7 +526,7 @@ mod tests {
     #[test]
     fn defaults_match_contract() {
         let v = serde_json::to_value(AppSettings::default()).unwrap();
-        assert_eq!(v["version"], 1);
+        assert_eq!(v["version"], 2);
         assert_eq!(v["onboarded"], false);
         assert_eq!(v["overlay"]["contentProtection"], true);
         assert_eq!(v["overlay"]["alwaysOnTop"], true);
@@ -505,7 +537,7 @@ mod tests {
         assert_eq!(v["audio"]["micDeviceId"], Value::Null);
         assert_eq!(v["audio"]["aec"], "auto");
         assert_eq!(v["stt"]["language"], "en");
-        assert_eq!(v["stt"]["endpointingMs"], 300);
+        assert_eq!(v["stt"]["endpointingMs"], 700);
         assert_eq!(v["stt"]["utteranceEndMs"], 1000);
         assert_eq!(v["ai"]["model"], "claude-opus-5-5");
         assert_eq!(v["ai"]["liveEffort"], "low");
@@ -590,7 +622,7 @@ mod tests {
     #[test]
     fn version_is_rust_owned() {
         let new = apply_patch(&AppSettings::default(), &json!({"version": 99})).unwrap();
-        assert_eq!(new.version, 1);
+        assert_eq!(new.version, SETTINGS_VERSION);
     }
 
     #[test]
@@ -618,6 +650,33 @@ mod tests {
         let (loaded, outcome) = load_or_default(&path);
         assert_eq!(outcome, LoadOutcome::Loaded);
         assert_eq!(loaded, s2);
+    }
+
+    #[test]
+    fn v1_file_on_the_old_default_pause_is_upgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut v1 = serde_json::to_value(AppSettings::default()).unwrap();
+        v1["version"] = json!(1);
+        v1["onboarded"] = json!(true);
+        v1["stt"]["endpointingMs"] = json!(300);
+        std::fs::write(&path, serde_json::to_vec(&v1).unwrap()).unwrap();
+        let (s, outcome) = load_or_default(&path);
+        assert_eq!(outcome, LoadOutcome::Migrated);
+        assert_eq!(s.version, 2);
+        assert_eq!(s.stt.endpointing_ms, 700);
+        assert!(s.onboarded, "everything else is kept");
+
+        // A pause the user chose is kept; a v2 file is never touched again.
+        v1["stt"]["endpointingMs"] = json!(450);
+        std::fs::write(&path, serde_json::to_vec(&v1).unwrap()).unwrap();
+        assert_eq!(load_or_default(&path).0.stt.endpointing_ms, 450);
+        let mut v2 = serde_json::to_value(AppSettings::default()).unwrap();
+        v2["stt"]["endpointingMs"] = json!(300);
+        std::fs::write(&path, serde_json::to_vec(&v2).unwrap()).unwrap();
+        let (s, outcome) = load_or_default(&path);
+        assert_eq!(outcome, LoadOutcome::Loaded);
+        assert_eq!(s.stt.endpointing_ms, 300);
     }
 
     #[test]
