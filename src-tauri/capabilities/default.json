@@ -3,7 +3,7 @@
   "identifier": "default",
   "description": "Overlay and dashboard windows",
   "windows": ["main", "dashboard"],
-  "platforms": ["windows"],
+  "platforms": ["windows", "macOS"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
