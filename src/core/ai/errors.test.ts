@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseAnswer, isNullAnswer, speakableText, talkingPoints } from "./answer";
 import { describeSessionError, isCancellation, mapLlmError } from "./errors";
+import { OS_NAME } from "../platform";
 
 describe("error mapping", () => {
   it("sends key problems to settings, never to retry", () => {
@@ -41,7 +42,7 @@ describe("error mapping", () => {
   });
 
   it("explains session errors with a fix where one exists", () => {
-    expect(describeSessionError("mic_permission_denied", "")).toEqual({ title: "Windows is blocking the microphone", fix: "mic_privacy" });
+    expect(describeSessionError("mic_permission_denied", "")).toEqual({ title: `${OS_NAME} is blocking the microphone`, fix: "mic_privacy" });
     expect(describeSessionError("dg_auth", "").fix).toBe("settings");
     expect(describeSessionError("anything", "Raw message").title).toBe("Raw message");
     expect(describeSessionError("session_active", "").title).toContain("already running");
