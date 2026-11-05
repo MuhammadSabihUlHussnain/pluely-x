@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the macOS app bundle's Info.plist by the Tauri bundler. -->
+<plist version="1.0">
+<dict>
+  <!-- A menu-bar app: no Dock icon (the overlay and the menu-bar icon are the UI). -->
+  <key>LSUIElement</key>
+  <true/>
+
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Pluely X transcribes what you say so it can follow the conversation and keep answers in sync with you.</string>
+
+  <!-- Core Audio process tap (macOS 14.4+): hearing the other side of the call. -->
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Pluely X listens to your computer's audio to transcribe the other people on the call and answer their questions.</string>
+
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Pluely X takes a screenshot only when you ask it about your screen.</string>
+</dict>
+</plist>

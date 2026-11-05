@@ -11,6 +11,7 @@ import { useKeys, useSettings } from "@/core/settings";
 import type { DeviceInfo, KeyTestResult, Level, Provider, SessionEvent } from "@/core/types";
 import { cn } from "@/lib/utils";
 import { levelToUnit } from "../overlay/LevelMeter";
+import { KEY_STORE, KEY_STORE_SHORT } from "@/core/platform";
 
 export function Section({
   id,
@@ -90,7 +91,7 @@ export function friendlyKeyError(provider: Provider, r: KeyTestResult): string {
     case "network":
       return "Couldn't reach the service. Check your connection and try again.";
     case "keyring_error":
-      return "Windows Credential Manager refused to store the key.";
+      return `${KEY_STORE} refused to store the key.`;
     case "key_missing":
       return "No key is saved yet.";
     case "rate_limited":
@@ -210,7 +211,7 @@ export function KeyStatusRow({ provider }: { provider: Provider }) {
           <p className="text-[13px] text-muted-foreground">
             {status?.present ? (
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-1.5 rounded-full bg-ok" /> Saved in Credential Manager · ending {status.hint ?? "…"}
+                <span className="size-1.5 rounded-full bg-ok" /> Saved in {KEY_STORE_SHORT} · ending {status.hint ?? "…"}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5">

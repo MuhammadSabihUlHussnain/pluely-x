@@ -1,6 +1,8 @@
 // Maps LLM / native errors to what an error card shows. Errors are rendered
 // as error cards and are never stored as answers.
 
+import { KEY_STORE, KEY_STORE_SHORT, OS_NAME } from "../platform";
+
 export type CardErrorAction = "settings" | "retry" | null;
 
 export interface CardError {
@@ -25,7 +27,7 @@ export function mapLlmError(e: ErrorLike): CardError {
       return {
         code: e.code,
         title: "Add your Claude key to get answers",
-        message: "Pluely X needs an Anthropic API key. It's stored in Windows Credential Manager.",
+        message: `Pluely X needs an Anthropic API key. It's stored in ${KEY_STORE}.`,
         action: "settings",
         retryable: false,
       };
@@ -49,7 +51,7 @@ export function mapLlmError(e: ErrorLike): CardError {
       return {
         code: e.code,
         title: "Couldn't read your Claude key",
-        message: "Windows Credential Manager didn't return the key. Save it again in Settings.",
+        message: `${KEY_STORE_SHORT} didn't return the key. Save it again in Settings.`,
         action: "settings",
         retryable: false,
       };
@@ -129,7 +131,7 @@ export function isCancellation(code: string): boolean {
 export function describeSessionError(code: string, fallback: string): { title: string; fix?: "mic_privacy" | "settings" } {
   switch (code) {
     case "mic_permission_denied":
-      return { title: "Windows is blocking the microphone", fix: "mic_privacy" };
+      return { title: `${OS_NAME} is blocking the microphone`, fix: "mic_privacy" };
     case "device_not_found":
       return { title: "That audio device isn't connected" };
     case "device_lost":
@@ -157,7 +159,7 @@ export function describeSessionError(code: string, fallback: string): { title: s
     case "session_ended":
       return { title: "The listening session already ended" };
     case "open_failed":
-      return { title: "Couldn't open Windows privacy settings" };
+      return { title: `Couldn't open ${OS_NAME} privacy settings` };
     default:
       return { title: fallback || "Listening hit a problem" };
   }

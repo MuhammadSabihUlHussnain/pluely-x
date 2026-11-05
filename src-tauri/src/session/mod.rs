@@ -22,6 +22,9 @@ use supervisor::{start_session, SessionHandle, SupervisorDeps};
 use types::*;
 
 pub const STATUS_EVENT: &str = "session://status";
+#[cfg(target_os = "macos")]
+pub const MIC_PRIVACY_URI: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+#[cfg(not(target_os = "macos"))]
 pub const MIC_PRIVACY_URI: &str = "ms-settings:privacy-microphone";
 
 /// Managed state: at most one live session.
@@ -176,7 +179,7 @@ pub async fn audio_list_devices(mgr: State<'_, SessionManager>) -> AppResult<Dev
 #[tauri::command]
 pub async fn audio_open_mic_privacy_settings() -> AppResult<()> {
     tauri_plugin_opener::open_url(MIC_PRIVACY_URI, None::<&str>).map_err(|e| {
-        AppError::new("open_failed", "Couldn't open Windows privacy settings.").with_detail(e.to_string())
+        AppError::new("open_failed", "Couldn't open the microphone privacy settings.").with_detail(e.to_string())
     })
 }
 

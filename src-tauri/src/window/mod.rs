@@ -2,9 +2,64 @@
 //! hidden from capture, clamped on screen (contract §4).
 
 pub mod dashboard;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod placement;
 #[cfg(windows)]
 pub mod win32;
+
+/// Typing mode and focus hand-back, per platform. The value stored as "the previous
+/// foreground" is a window handle on Windows and a process id on macOS.
+mod focus {
+    #[cfg(target_os = "macos")]
+    pub use super::macos::{is_typing, set_typing};
+    #[cfg(windows)]
+    pub use super::win32::{is_typing, set_typing};
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    static TYPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    #[cfg(not(any(windows, target_os = "macos")))]
+    pub fn set_typing(v: bool) {
+        TYPING.store(v, std::sync::atomic::Ordering::SeqCst);
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    pub fn is_typing() -> bool {
+        TYPING.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// What has the focus right now (0 = unknown).
+    pub fn foreground() -> isize {
+        #[cfg(windows)]
+        {
+            super::win32::foreground_window()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            super::macos::frontmost_pid() as isize
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            0
+        }
+    }
+
+    /// Gives the focus back to what `foreground()` returned earlier.
+    pub fn restore(raw: isize) -> bool {
+        #[cfg(windows)]
+        {
+            super::win32::restore_foreground(raw)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            super::macos::activate_pid(raw as i32)
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            let _ = raw;
+            false
+        }
+    }
+}
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
@@ -140,8 +195,11 @@ pub fn create_main<R: Runtime>(
         .content_protected(o.content_protection)
         .focusable(false)
         .focused(false)
-        .visible(false)
-        .build()?;
+        .visible(false);
+    // macOS: clicks work without activating the app first, and the overlay is on every Space.
+    #[cfg(target_os = "macos")]
+    let window = window.accept_first_mouse(true).visible_on_all_workspaces(true);
+    let window = window.build()?;
 
     #[cfg(windows)]
     {
@@ -170,6 +228,8 @@ pub fn create_main<R: Runtime>(
     window.show()?;
     #[cfg(windows)]
     win32::ensure_topmost(window.hwnd()?);
+    #[cfg(target_os = "macos")]
+    macos::configure_overlay(&window, o.always_on_top);
     spawn_topmost_ticker(app.clone());
     tracing::info!(saved = saved.is_some(), "overlay created");
     Ok(window)
@@ -178,8 +238,7 @@ pub fn create_main<R: Runtime>(
 fn on_main_event<R: Runtime>(app: &AppHandle<R>, event: &WindowEvent) {
     match event {
         WindowEvent::Focused(false) => {
-            #[cfg(windows)]
-            if win32::is_typing() {
+            if focus::is_typing() {
                 let since = *app
                     .state::<OverlayRuntime>()
                     .typing_since
@@ -299,10 +358,7 @@ pub fn current_state<R: Runtime>(app: &AppHandle<R>) -> AppResult<WindowState> {
     let s = app.state::<SettingsState>().get();
     let scale = w.scale_factor().unwrap_or(1.0);
     let r = outer_rect(&w)?;
-    #[cfg(windows)]
-    let typing = win32::is_typing();
-    #[cfg(not(windows))]
-    let typing = false;
+    let typing = focus::is_typing();
     Ok(WindowState {
         visible: w.is_visible()?,
         click_through: s.overlay.click_through,
@@ -347,8 +403,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
 }
 
 pub fn hide<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
-    #[cfg(windows)]
-    if win32::is_typing() {
+    if focus::is_typing() {
         let _ = end_typing(app, true);
     }
     main_window(app)?.hide()?;
@@ -381,6 +436,8 @@ pub fn apply_overlay_flags<R: Runtime>(app: &AppHandle<R>, o: &OverlaySettings) 
                 win32::ensure_topmost(h);
             }
         }
+        #[cfg(target_os = "macos")]
+        macos::configure_overlay(&w, o.always_on_top);
     }
     for (label, w) in app.webview_windows() {
         if let Err(e) = w.set_content_protected(o.content_protection) {
@@ -396,17 +453,15 @@ pub fn begin_typing<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     if !w.is_visible()? {
         show(app)?;
     }
-    #[cfg(windows)]
     {
         let rt = app.state::<OverlayRuntime>();
-        let own = w.hwnd().map(win32::hwnd_to_isize).unwrap_or(0);
-        let fg = win32::foreground_window();
-        let was_typing = win32::is_typing();
-        if !was_typing && fg != 0 && fg != own && !is_own_window(app, fg) {
+        let fg = focus::foreground();
+        let was_typing = focus::is_typing();
+        if !was_typing && fg != 0 && !is_own_foreground(app, &w, fg) {
             rt.prev_foreground.store(fg, Ordering::SeqCst);
         }
         *rt.typing_since.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-        win32::set_typing(true);
+        focus::set_typing(true);
         if w.set_ignore_cursor_events(false).is_err() {
             tracing::warn!("couldn't lift click-through for typing");
         }
@@ -421,12 +476,11 @@ pub fn begin_typing<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
 }
 
 pub fn end_typing<R: Runtime>(app: &AppHandle<R>, restore_focus: bool) -> AppResult<()> {
-    #[cfg(windows)]
     {
         let w = main_window(app)?;
         let rt = app.state::<OverlayRuntime>();
-        let was_typing = win32::is_typing();
-        win32::set_typing(false);
+        let was_typing = focus::is_typing();
+        focus::set_typing(false);
         *rt.typing_since.lock().unwrap_or_else(|e| e.into_inner()) = None;
         w.set_focusable(false)?;
         let click_through = app.state::<SettingsState>().get().overlay.click_through;
@@ -434,7 +488,7 @@ pub fn end_typing<R: Runtime>(app: &AppHandle<R>, restore_focus: bool) -> AppRes
             let _ = w.set_ignore_cursor_events(true);
         }
         let prev = rt.prev_foreground.swap(0, Ordering::SeqCst);
-        if restore_focus && prev != 0 && !win32::restore_foreground(prev) {
+        if restore_focus && prev != 0 && !focus::restore(prev) {
             tracing::debug!("previous foreground window could not be restored");
         }
         if was_typing {
@@ -442,9 +496,27 @@ pub fn end_typing<R: Runtime>(app: &AppHandle<R>, restore_focus: bool) -> AppRes
             let _ = changed(app);
         }
     }
-    #[cfg(not(windows))]
-    let _ = (app, restore_focus);
     Ok(())
+}
+
+/// Whether the focused thing `fg` (from `focus::foreground`) is this app.
+#[cfg(windows)]
+fn is_own_foreground<R: Runtime>(app: &AppHandle<R>, w: &WebviewWindow<R>, fg: isize) -> bool {
+    let own = w.hwnd().map(win32::hwnd_to_isize).unwrap_or(0);
+    fg == own || is_own_window(app, fg)
+}
+
+#[cfg(not(windows))]
+fn is_own_foreground<R: Runtime>(_app: &AppHandle<R>, _w: &WebviewWindow<R>, fg: isize) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::is_own_pid(fg as i32)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = fg;
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -452,6 +524,16 @@ fn is_own_window<R: Runtime>(app: &AppHandle<R>, raw: isize) -> bool {
     app.webview_windows()
         .values()
         .any(|w| w.hwnd().map(win32::hwnd_to_isize).ok() == Some(raw))
+}
+
+/// The focus hand-back target for other modules (region capture).
+pub fn foreground_for_restore() -> isize {
+    focus::foreground()
+}
+
+/// Hands focus back to what [`foreground_for_restore`] returned.
+pub fn restore_foreground(raw: isize) -> bool {
+    focus::restore(raw)
 }
 
 pub fn move_by_physical<R: Runtime>(app: &AppHandle<R>, dx: i32, dy: i32) -> AppResult<()> {

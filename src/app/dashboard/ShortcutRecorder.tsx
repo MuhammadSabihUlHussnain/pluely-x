@@ -8,6 +8,7 @@ import { SHORTCUT_LABELS } from "@/core/defaults";
 import { native } from "@/core/native";
 import { acceleratorFromEvent, duplicateActions, knownConflict, validateAccelerator } from "@/core/shortcuts";
 import type { AppSettings, ShortcutAction } from "@/core/types";
+import { OS_NAME } from "@/core/platform";
 
 export function ShortcutRecorder({
   action,
@@ -52,7 +53,7 @@ export function ShortcutRecorder({
     try {
       const ok = await native.shortcutsValidate(key);
       if (!ok) {
-        setError("Windows can't register this combination");
+        setError(`${OS_NAME} can't register this combination`);
         return;
       }
       onSave(key);

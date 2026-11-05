@@ -82,6 +82,13 @@ fn setup<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error
     app.manage(SettingsState::load(config_dir.join("settings.json")));
     app.manage(window::OverlayRuntime::new(config_dir));
 
+    // macOS: a menu-bar app with no Dock icon (the Windows overlay likewise stays out of the
+    // taskbar). It's also what lets the overlay sit over other apps' full-screen Spaces.
+    #[cfg(target_os = "macos")]
+    if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Accessory) {
+        tracing::warn!(error = %e, "couldn't switch to an accessory (menu-bar) app");
+    }
+
     let settings = app.state::<SettingsState>().get();
     window::create_main(app, &settings)?;
     settings::apply_side_effects(app, None, &settings);

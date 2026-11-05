@@ -1,0 +1,82 @@
+name: macOS
+
+on:
+  push:
+    branches: [mac-support, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Tests (Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: test
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npx vitest run
+
+      # The Rust crate embeds the built frontend, so it has to exist before cargo compiles.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Native tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+  bundle:
+    name: App bundle (universal .dmg)
+    runs-on: macos-15
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: bundle
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Unsigned (ad-hoc) build: no Apple Developer account. See docs/MACOS.md.
+      - name: Build Pluely X.app and .dmg
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg
+
+      - name: Upload .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pluely-X-macOS-universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

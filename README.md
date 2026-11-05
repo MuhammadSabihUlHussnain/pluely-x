@@ -1,6 +1,6 @@
 # Pluely X
 
-**A real-time AI copilot for meetings, interviews, coding and lectures on Windows.** It sits in a small overlay, listens to both sides of a call, notices when you're asked something, and shows a short answer you can say out loud. It can also solve whatever is on your screen.
+**A real-time AI copilot for meetings, interviews, coding and lectures on Windows and macOS.** It sits in a small overlay, listens to both sides of a call, notices when you're asked something, and shows a short answer you can say out loud. It can also solve whatever is on your screen.
 
 Pluely X is a ground-up rebuild of [Pluely](https://github.com/iamsrikanthnani/pluely) by Srikanth Nani. It keeps Pluely's native core (Tauri, system-audio capture, screenshots, an overlay hidden from screen share) and replaces the rest. See [Credits and license](#credits-and-license).
 
@@ -11,7 +11,7 @@ Pluely X is a ground-up rebuild of [Pluely](https://github.com/iamsrikanthnani/p
 
 ## What it does
 
-- **One-minute setup.** Paste a Claude key and, optionally, a Deepgram key. Both are tested live and stored in Windows Credential Manager.
+- **One-minute setup.** Paste a Claude key and, optionally, a Deepgram key. Both are tested live and stored in Windows Credential Manager or the macOS Keychain.
 - **Live two-sided transcript.** Your mic ("You") and the call audio ("Them") are captured separately and transcribed as people speak, using Deepgram's Nova-3 streaming.
 - **Answers when you're asked.** When the other person finishes a question, an answer starts streaming in about a second. Small talk is ignored. *What should I say?* (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd>) works any time.
 - **Answers you can say out loud.** Each answer opens with one or two first-person sentences you can read word for word, followed by a few short talking points. Private tips ("swap in your own numbers") are kept apart from the script.
@@ -24,7 +24,7 @@ Pluely X is a ground-up rebuild of [Pluely](https://github.com/iamsrikanthnani/p
 
 ## Requirements
 
-- Windows 10 or 11 (x64)
+- Windows 10 or 11 (x64), or macOS 14.4+ (Apple Silicon or Intel; preview, see [docs/MACOS.md](docs/MACOS.md))
 - An [Anthropic API key](https://console.anthropic.com/). Answers use Claude Opus 5.5 by default; you can change the model and effort in Settings.
 - A [Deepgram API key](https://console.deepgram.com/) to transcribe live calls. It's optional if you only type questions or ask about your screen.
 
@@ -38,7 +38,7 @@ npx tauri dev                    # run in development
 npx tauri build --bundles nsis   # build the Windows installer
 ```
 
-The installer is written to `src-tauri/target/release/bundle/nsis/`.
+The installer is written to `src-tauri/target/release/bundle/nsis/`. For the macOS build (`.dmg`) and its permissions, see [docs/MACOS.md](docs/MACOS.md).
 
 Tests:
 
@@ -61,12 +61,12 @@ cargo test --lib hw_ -- --ignored       # optional: real audio devices
 | Click-through on / off | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> |
 | Sessions and settings | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> |
 
-Every shortcut can be changed in Settings, and conflicts with other apps are reported.
+Every shortcut can be changed in Settings, and conflicts with other apps are reported. On a Mac the same keys use <kbd>⌃ Control</kbd>+<kbd>⌥ Option</kbd>.
 
 ## Privacy
 
-- API keys live in Windows Credential Manager and never reach the web view. All network calls are made by the Rust side.
-- Sessions, transcripts, briefs and settings are stored locally on your PC (SQLite).
+- API keys live in Windows Credential Manager (macOS: Keychain) and never reach the web view. All network calls are made by the Rust side.
+- Sessions, transcripts, briefs and settings are stored locally on your computer (SQLite).
 - Call audio is sent to Deepgram for transcription. Transcripts, screenshots you choose to send, and briefs go to Anthropic to generate answers. Nothing else is sent anywhere, and there is no telemetry.
 
 ## Use it responsibly

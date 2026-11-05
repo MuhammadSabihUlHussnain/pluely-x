@@ -3,7 +3,7 @@
 //! Pure, platform-independent pieces: [`frame`] (50 ms framing), [`level`] (meters),
 //! [`timeline`] (session clock + per-connection sample→time map), [`resample`] (fallback
 //! converter), [`pump`] (packet → frame → channel logic incl. tail-fill) and [`dump`]
-//! (debug WAV writer). The WASAPI backend lives in [`win`].
+//! (debug WAV writer). The WASAPI backend lives in [`win`], the Core Audio one in [`mac`].
 //!
 //! The supervisor only talks to capture through [`CaptureBackend`], so tests inject fakes.
 
@@ -13,6 +13,8 @@ pub mod level;
 pub mod pump;
 pub mod resample;
 pub mod timeline;
+#[cfg(target_os = "macos")]
+pub mod mac;
 #[cfg(windows)]
 pub mod win;
 
@@ -136,14 +138,14 @@ pub enum CaptureExit {
     Stopped,
     /// The endpoint went away or the stream broke; the supervisor restarts with backoff.
     DeviceLost(String),
-    /// Mic access was revoked (Windows privacy setting).
+    /// Mic access was revoked (Windows privacy setting / macOS Privacy & Security).
     PermissionDenied,
 }
 
 /// Why a capture couldn't start.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CaptureError {
-    #[error("Microphone access is turned off in Windows privacy settings")]
+    #[error("Microphone access is turned off in the system privacy settings")]
     PermissionDenied,
     #[error("No audio device found: {0}")]
     DeviceNotFound(String),
@@ -162,10 +164,7 @@ impl CaptureError {
 
     pub fn user_message(&self, source: Source) -> String {
         match (self, source) {
-            (CaptureError::PermissionDenied, _) => {
-                "Microphone access is blocked. Turn it on in Windows Settings > Privacy > Microphone."
-                    .to_string()
-            }
+            (CaptureError::PermissionDenied, _) => MIC_BLOCKED_MESSAGE.to_string(),
             (CaptureError::DeviceNotFound(_), Source::Me) => "No microphone was found.".to_string(),
             (CaptureError::DeviceNotFound(_), Source::Them) => {
                 "No speaker or headphone output was found.".to_string()
@@ -185,6 +184,13 @@ impl CaptureError {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+const MIC_BLOCKED_MESSAGE: &str =
+    "Microphone access is blocked. Turn on Pluely X in System Settings > Privacy & Security > Microphone.";
+#[cfg(not(target_os = "macos"))]
+const MIC_BLOCKED_MESSAGE: &str =
+    "Microphone access is blocked. Turn it on in Windows Settings > Privacy > Microphone.";
 
 /// Counters shared by a source's capture thread, its Deepgram task and the supervisor.
 #[derive(Debug, Default)]
@@ -315,32 +321,39 @@ pub fn default_backend() -> Arc<dyn CaptureBackend> {
     {
         Arc::new(win::capture::WasapiBackend)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        Arc::new(mac::capture::MacBackend)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         Arc::new(UnsupportedBackend)
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 struct UnsupportedBackend;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 impl CaptureBackend for UnsupportedBackend {
     fn start(&self, _req: CaptureRequest) -> Result<RunningCapture, CaptureError> {
         Err(CaptureError::InitFailed(
-            "audio capture is only implemented on Windows".into(),
+            "audio capture is only implemented on Windows and macOS".into(),
         ))
     }
 }
 
-/// Device listing + notifications. On Windows this is the long-lived `audio-ctl` MTA thread.
+/// Device listing + notifications. On Windows this is the long-lived `audio-ctl` MTA thread;
+/// on macOS a thread that polls Core Audio.
 #[cfg(windows)]
 pub use win::control::AudioControl;
+#[cfg(target_os = "macos")]
+pub use mac::control::AudioControl;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub struct AudioControl;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 impl AudioControl {
     pub fn start() -> Self {
         AudioControl
@@ -351,7 +364,7 @@ impl AudioControl {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 impl DeviceWatcher for AudioControl {
     fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<DeviceEvent> {
         tokio::sync::mpsc::unbounded_channel().1

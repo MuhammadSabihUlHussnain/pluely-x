@@ -6,6 +6,7 @@
 // for the telltale pattern of your mic hearing speech while no interviewer speech arrives.
 
 import type { Level } from "../types";
+import { IS_MAC } from "../platform";
 
 /** Peak level (dBFS) above which a capture counts as "hearing something". */
 export const SIGNAL_PEAK_DB = -55;
@@ -196,8 +197,9 @@ export function describeProblem(
     case "silent":
       return {
         title: "Can't hear computer audio",
-        detail:
-          "A test beep didn't reach the capture. Check that the call plays through this computer's default speakers and isn't muted, then re-run the check.",
+        detail: IS_MAC
+          ? "A test beep didn't reach Pluely X. Allow it under System Settings > Privacy & Security > Screen & System Audio Recording (System Audio Recording Only), then stop and start listening."
+          : "A test beep didn't reach the capture. Check that the call plays through this computer's default speakers and isn't muted, then re-run the check.",
       };
     case "unverified":
       return {

@@ -3,6 +3,7 @@
 // lib/storage/shortcuts.storage.ts validation and display logic.
 
 import type { AppSettings, ShortcutAction } from "./types";
+import { IS_MAC } from "./platform";
 
 const MODIFIERS = ["ctrl", "alt", "shift", "super"] as const;
 
@@ -127,24 +128,24 @@ export function validateAccelerator(key: string): { ok: true } | { ok: false; re
   return { ok: true };
 }
 
-/** Display parts for <Kbd>, e.g. ["Ctrl", "Alt", "L"]. */
-export function displayParts(key: string): string[] {
+/** Display parts for <Kbd>, e.g. ["Ctrl", "Alt", "L"] (on a Mac ["⌃", "⌥", "L"]). */
+export function displayParts(key: string, mac: boolean = IS_MAC): string[] {
   if (!key) return [];
   return normalizeAccelerator(key)
     .split("+")
     .map((p) => {
-      if (p === "ctrl") return "Ctrl";
-      if (p === "alt") return "Alt";
-      if (p === "shift") return "Shift";
-      if (p === "super") return "Win";
+      if (p === "ctrl") return mac ? "⌃" : "Ctrl";
+      if (p === "alt") return mac ? "⌥" : "Alt";
+      if (p === "shift") return mac ? "⇧" : "Shift";
+      if (p === "super") return mac ? "⌘" : "Win";
       if (KEY_NAMES[p]) return KEY_NAMES[p];
       if (/^f\d+$/.test(p)) return p.toUpperCase();
       return p.toUpperCase();
     });
 }
 
-export function displayAccelerator(key: string): string {
-  return displayParts(key).join("+");
+export function displayAccelerator(key: string, mac: boolean = IS_MAC): string {
+  return displayParts(key, mac).join(mac ? "" : "+");
 }
 
 /** Combos that Windows, Teams, Zoom or Office commonly own. */

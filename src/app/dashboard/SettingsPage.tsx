@@ -32,6 +32,7 @@ import { ModeIcon } from "../shared/modes";
 import { DeviceSelect } from "./DeviceSelect";
 import { BigMeter, KeyStatusRow, LiveWords, Row, Section, useAudioTest } from "./parts";
 import { ShortcutRecorder } from "./ShortcutRecorder";
+import { IS_MAC, KEY_STORE } from "@/core/platform";
 
 const TOC = [
   ["keys", "Keys & models"],
@@ -172,7 +173,7 @@ function KeysSection() {
     <Section
       id="keys"
       title="Keys & models"
-      description="Keys live in Windows Credential Manager. They never reach this window and are never shown again after saving."
+      description={`Keys live in ${KEY_STORE}. They never reach this window and are never shown again after saving.`}
     >
       <KeyStatusRow provider="anthropic" />
       <KeyStatusRow provider="deepgram" />
@@ -257,7 +258,11 @@ function AudioSection() {
       </Row>
       <Row
         label="Echo cancellation"
-        description="Windows echo cancellation on the mic. Often unsupported; your own voice is de-duplicated from the transcript either way."
+        description={
+          IS_MAC
+            ? "Not available on macOS yet; your own voice is de-duplicated from the transcript either way."
+            : "Windows echo cancellation on the mic. Often unsupported; your own voice is de-duplicated from the transcript either way."
+        }
         htmlFor="aec"
       >
         <Select value={s.audio.aec} onValueChange={(v) => void update({ audio: { aec: v as "auto" | "on" | "off" } })}>
@@ -485,7 +490,7 @@ function OverlaySection() {
       >
         <Switch id="clickthrough" checked={o.clickThrough} onCheckedChange={(v) => void update({ overlay: { clickThrough: v } })} />
       </Row>
-      <Row label="Launch at startup" description="Start Pluely X hidden in the tray when Windows starts." htmlFor="autostart">
+      <Row label="Launch at startup" description={IS_MAC ? "Start Pluely X in the menu bar when you log in." : "Start Pluely X hidden in the tray when Windows starts."} htmlFor="autostart">
         <Switch id="autostart" checked={o.launchAtStartup} onCheckedChange={(v) => void update({ overlay: { launchAtStartup: v } })} />
       </Row>
       <Row label="Overlay position" description="Move it back to the top centre of your main screen.">

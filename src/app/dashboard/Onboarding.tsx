@@ -10,6 +10,7 @@ import type { ShortcutAction } from "@/core/types";
 import { cn } from "@/lib/utils";
 import { DeviceSelect } from "./DeviceSelect";
 import { BigMeter, ExternalLinkButton, KeyEntry, LiveWords, useAudioTest } from "./parts";
+import { KEY_STORE } from "@/core/platform";
 
 const STEPS = ["Claude", "Listening", "Audio check", "Shortcuts"] as const;
 
@@ -72,7 +73,7 @@ export function Onboarding() {
           {step === 0 && (
             <StepShell
               title="Connect Claude"
-              lead="Pluely X answers with Claude Opus 5.5. Paste an Anthropic API key — it's tested live and stored in Windows Credential Manager, never in a file."
+              lead={`Pluely X answers with Claude Opus 5.5. Paste an Anthropic API key — it's tested live and stored in ${KEY_STORE}, never in a file.`}
             >
               {keys?.anthropic.present ? (
                 <SavedKey hint={keys.anthropic.hint} />
@@ -148,7 +149,7 @@ function SavedKey({ hint }: { hint?: string }) {
       </span>
       <div>
         <p className="text-[14px] font-medium">Key saved and working</p>
-        <p className="text-[13px] text-muted-foreground">Stored in Windows Credential Manager · ending {hint ?? "…"}</p>
+        <p className="text-[13px] text-muted-foreground">Stored in {KEY_STORE} · ending {hint ?? "…"}</p>
       </div>
     </div>
   );

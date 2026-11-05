@@ -217,12 +217,10 @@ fn close_overlays<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-#[cfg_attr(not(windows), allow(unused_variables))]
 fn end_region<R: Runtime>(app: &AppHandle<R>, session: Option<RegionSession>) {
     close_overlays(app);
-    #[cfg(windows)]
     if let Some(s) = session {
-        crate::window::win32::restore_foreground(s.prev_foreground);
+        crate::window::restore_foreground(s.prev_foreground);
     }
 }
 
@@ -243,10 +241,7 @@ pub async fn screenshot_region_start(app: AppHandle) -> AppResult<()> {
     if mons.is_empty() {
         return Err(AppError::new("capture_failed", "No monitors found"));
     }
-    #[cfg(windows)]
-    let prev_foreground = crate::window::win32::foreground_window();
-    #[cfg(not(windows))]
-    let prev_foreground = 0;
+    let prev_foreground = crate::window::foreground_for_restore();
 
     // freeze every monitor first so the overlays aren't in the picture
     let to_capture: Vec<(String, (i32, i32), f64)> = mons
