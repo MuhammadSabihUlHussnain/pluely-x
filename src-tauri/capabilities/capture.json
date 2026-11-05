@@ -3,6 +3,6 @@
   "identifier": "capture",
   "description": "Region-capture overlays (one per monitor)",
   "windows": ["capture-overlay-*"],
-  "platforms": ["windows"],
+  "platforms": ["windows", "macOS"],
   "permissions": ["core:default"]
 }
